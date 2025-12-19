@@ -1,0 +1,21 @@
+[project]
+name = "welllogging"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openpyxl>=3.1.5",
+    "pyinstaller>=6.17.0",
+    "pyside6>=6.10.1",
+    "welly>=0.5.2",
+]
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
+default = true
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
