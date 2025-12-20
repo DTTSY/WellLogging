@@ -952,7 +952,7 @@ class DrillingPressureCalculator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # 保存详细结果到CSV
-        csv_filename = f"drilling_results_{timestamp}.csv"
+        csv_filename = f"output/drilling_results_{timestamp}.csv"
 
         # 计算钻井当量密度
         df["drilling_eq_density"] = df.apply(
@@ -991,7 +991,7 @@ class DrillingPressureCalculator:
             print(f"保存CSV文件失败: {str(e)}")
 
         # 保存简化的对比数据文件
-        txt_filename = f"comparison_results_{timestamp}.txt"
+        txt_filename = f"output/comparison_results_{timestamp}.txt"
         try:
             with open(txt_filename, 'w', encoding='utf-8') as f:
                 f.write("# 钻井压力计算结果对比\n")

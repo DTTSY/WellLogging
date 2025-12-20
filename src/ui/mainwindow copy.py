@@ -1,44 +1,72 @@
-from __future__ import annotations
-
-from PySide6.QtCore import QSize, Qt, QThread
+from PySide6.QtCore import QSize, Qt, QObject, Signal, QThread
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (
-    QMainWindow,
-    QToolBar,
-    QStatusBar,
-    QFileDialog,
-    QMessageBox,
-    QLabel,
-    QDialog,
-    QFormLayout,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QWidget,
-    QProgressDialog,
-)
+from PySide6.QtWidgets import QMainWindow,QToolBar,QStatusBar,QFileDialog,QMessageBox,QLabel
 from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QDoubleSpinBox,QWidget, QProgressDialog
 import pandas as pd
 import os
+from collections import defaultdict
+from time import perf_counter
+import traceback
 
-from src.controllers.log_data_controller import LogDataController
-from src.controllers.drilling_pressure_controller import (
-    DrillingPressureController,
-)
-from src.models.log_data_model import LogDataModel
-from src.models.drilling_pressure_model import DrillingPressureModel
 from src.ui.ChartArea import MultiTrackWidget
 from src.ui.DrillingPressureCalculator_window_ui import Ui_w_DrillingPressureCalculator
-from src.core.algorithm.DrillingPressureCalculator import OperationType
+from src.core.algorithm.DrillingPressureCalculator import DrillingPressureCalculator,OperationType
 
+
+class CalculationWorker(QObject):
+    progress = Signal(int, str, float)
+    finished = Signal(pd.DataFrame, float)
+    error = Signal(str)
+
+    def __init__(self, main_data: pd.DataFrame, cf_data, operation: OperationType, calculator_params: dict):
+        super().__init__()
+        self._main_data = main_data
+        self._cf_data = cf_data
+        self._operation = operation
+        self._calculator_params = calculator_params
+
+    def _emit_progress(self, value: int, message: str, start_time: float):
+        elapsed = perf_counter() - start_time
+        self.progress.emit(value, message, elapsed)
+
+    def run(self):
+        start_time = perf_counter()
+        try:
+            calculator = DrillingPressureCalculator()
+            for attr, val in self._calculator_params.items():
+                setattr(calculator, attr, val)
+
+            df = self._main_data.copy(deep=True)
+
+            self._emit_progress(5, "准备计算参数", start_time)
+            df = calculator.calculate_a_values(df)
+            self._emit_progress(25, "已计算a值", start_time)
+            df = calculator.calculate_v_values(df)
+            self._emit_progress(45, "已计算v值", start_time)
+            df = calculator.fill_collapse_fracture_data(df, self._cf_data)
+            self._emit_progress(65, "已填充坍塌破裂数据", start_time)
+            df = calculator.calculate_all_pressures(df, self._operation)
+            self._emit_progress(85, "已计算钻井压力", start_time)
+            calculator.save_results(df, self._operation)
+            # self._emit_progress(100, "已保存结果", start_time)
+
+            total_elapsed = perf_counter() - start_time
+            self.finished.emit(df, total_elapsed)
+        except Exception as exc:
+            message = traceback.format_exc()
+            self.error.emit(message)
 
 class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
-    def __init__(self, parent=None, controller: DrillingPressureController | None = None):
+    def __init__(self, parent=None,mw=None):
         super(DrillingPressureCalculator_ui, self).__init__(parent)
         self.setupUi(self)
-        self.controller = controller or DrillingPressureController(DrillingPressureModel())
-        self._model = self.controller.model
-        self.pb_open_main.clicked.connect(lambda: self.open_file("main_data"))
-        self.pb_open_dpf.clicked.connect(lambda: self.open_file("cf_data"))
+        self.mw = mw
+        # Additional initialization code can go here
+        self.calculator = DrillingPressureCalculator()
+        self.pb_open_main.clicked.connect(lambda : self.open_file('main_data'))
+        self.pb_open_dpf.clicked.connect(lambda : self.open_file('cf_data'))
+        self.model = defaultdict(lambda: None)
         self._calc_thread = None
         self._worker = None
         self._progress_dialog = None
@@ -51,18 +79,17 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
             self.drilling_action(operation=operation)
 
     def data_validation(self):
-        if self._model.main_data is None:
+        # TODO: validate input data from UI
+        if self.model['main_data'] is None:
             QMessageBox.warning(self, "数据缺失", "请先导入主数据文件")
             return False
-        if self._model.cf_data is None:
+        if self.model['cf_data'] is None: 
             QMessageBox.warning(self, "数据缺失", "请先导入坍塌破裂压力数据文件")
             return False
-        self.controller.update_parameters(
-            Dh=self.dsb_Dh.value(),
-            Dhi=self.dsb_Dhi.value(),
-            fai300=self.dsb_fai300.value(),
-            fai600=self.dsb_fai600.value(),
-        )
+        self.calculator.Dh = self.dsb_Dh.value()
+        self.calculator.Dhi = self.dsb_Dhi.value()
+        self.calculator.fai300 = self.dsb_fai300.value()
+        self.calculator.fai600 = self.dsb_fai600.value()
         return True
     
     def drilling_action(self, operation: OperationType):
@@ -70,9 +97,16 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
             QMessageBox.information(self, "计算进行中", "请等待当前计算完成。")
             return
 
-        if self._model.main_data is None or self._model.cf_data is None:
+        if self.model['main_data'] is None or self.model['cf_data'] is None:
             QMessageBox.warning(self, "数据缺失", "请先导入所需的数据文件。")
             return
+
+        calculator_params = {
+            'Dh': self.calculator.Dh,
+            'Dhi': self.calculator.Dhi,
+            'fai300': self.calculator.fai300,
+            'fai600': self.calculator.fai600
+        }
 
         self.pb_up.setEnabled(False)
         self.pb_down.setEnabled(False)
@@ -86,15 +120,12 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self._progress_dialog.show()
 
         thread = QThread(self)
-        try:
-            worker = self.controller.create_worker(operation)
-        except ValueError as exc:
-            self._reset_progress_state()
-            self.pb_up.setEnabled(True)
-            self.pb_down.setEnabled(True)
-            QMessageBox.warning(self, "数据缺失", str(exc))
-            return
-
+        worker = CalculationWorker(
+            main_data=self.model['main_data'],
+            cf_data=self.model['cf_data'],
+            operation=operation,
+            calculator_params=calculator_params
+        )
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
@@ -119,6 +150,7 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self._progress_dialog.setLabelText(f"{message}\n耗时: {elapsed:.1f} 秒")
 
     def _handle_calculation_finished(self, df: pd.DataFrame, elapsed: float):
+        self.model['result'] = df
         if self._progress_dialog is not None:
             self._progress_dialog.setValue(100)
             self._progress_dialog.setLabelText(f"已保存结果\n总耗时: {elapsed:.2f} 秒")
@@ -129,7 +161,9 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         QMessageBox.information(self, "计算完成", f"计算耗时: {elapsed:.2f} 秒，钻井压力计算已完成并保存结果文件。")
 
     def _handle_calculation_error(self, message: str):
-        self._reset_progress_state()
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+            self._progress_dialog = None
         self.pb_up.setEnabled(True)
         self.pb_down.setEnabled(True)
         QMessageBox.critical(self, "计算失败", message)
@@ -138,22 +172,20 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self._calc_thread = None
         self._worker = None
 
-    def _reset_progress_state(self) -> None:
-        if self._progress_dialog is not None:
-            self._progress_dialog.close()
-            self._progress_dialog = None
 
-    def open_file(self, file_type: str):
+
+    def open_file(self,file_type:str):
         fname, _ = QFileDialog.getOpenFileName(self, "Open main data file", "", "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)")
         if not fname:
             QMessageBox.information(self, "No File Selected", "No file was selected.")
             return
         try:
-            if file_type == "main_data":
-                self.controller.load_main_data(fname)
-            elif file_type == "cf_data":
-                self.controller.load_cf_data(fname)
+            if file_type == 'main_data':
+                self.model[file_type] = self.calculator.read_main_data(fname)
+            elif file_type == 'cf_data':
+                self.model[file_type] = self.calculator.read_collapse_fracture_data(fname)
             QMessageBox.information(self, "File Loaded", f"Successfully loaded file: {os.path.basename(fname)}")
+            # You can now use 'data' with your DrillingPressureCalculator instance
         except Exception as e:
             QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
             return
@@ -166,8 +198,7 @@ class MainWindow(QMainWindow):
         # 设置窗口的最小尺寸
         self.setMinimumSize(QSize(1200, 800))
         self.mt = None
-        self.log_model = LogDataModel()
-        self.log_controller = LogDataController(self.log_model)
+        self.dataModel = dict()
 
         #Menubar and menus
         menu_bar = self.menuBar()
@@ -186,9 +217,13 @@ class MainWindow(QMainWindow):
                 return
             try:
                 # data = np.loadtxt(fname, delimiter=',')
-                self.log_controller.load_file(fname)
-                data = self.log_model.data
+                metaInfo = dict()
+                metaInfo['well_name'] = os.path.basename(fname).split('.')[0]
+                data =  pd.read_csv(fname)
+                metaInfo['depth_range'] = (float(data.iloc[:,0].min()), float(data.iloc[:,0].max()))
                 self.statusBar().showMessage(f"Loaded file: {os.path.basename(fname)}", 5000)
+                self.dataModel['log_data'] = data
+                self.dataModel['log_metaInfo'] = metaInfo
             except Exception as e:
                 QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
                 return
@@ -199,7 +234,7 @@ class MainWindow(QMainWindow):
             if data.shape[1] < 2:
                 QMessageBox.warning(self, "Format error", "File must have at least two columns (value, depth)")
                 return
-            self.set_mt()
+            self.set_mt(data)
 
         open_action.triggered.connect(open_file)
 
@@ -275,9 +310,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
 
     def open_drilling_pressure_calculator(self):
-        model = DrillingPressureModel()
-        controller = DrillingPressureController(model)
-        self.dlg = DrillingPressureCalculator_ui(controller=controller)
+        self.dlg = DrillingPressureCalculator_ui()
         self.dlg.show()
 
     def quit_app(self):
@@ -288,12 +321,17 @@ class MainWindow(QMainWindow):
     
     def adjustDepthValue(self):
         # 打开一个对话课框，获取用户输入的深度值，最大值和最小值
-        if not self.log_model.is_loaded:
+        if 'log_data' not in self.dataModel:
             QMessageBox.warning(self, "数据缺失", "未导入有效数据")
             return
 
         # determine sensible defaults
-        default_min, default_max = self.log_controller.depth_defaults()
+        data = self.dataModel.get('log_data')
+        try:
+            default_min = float(data.iloc[:, 0].min())
+            default_max = float(data.iloc[:, 0].max())
+        except Exception:
+            default_min, default_max = 0.0, 100.0
 
         dlg = QDialog(self)
         dlg.setWindowTitle("调整深度范围")
@@ -327,23 +365,20 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self.set_mt(depth_range=(dmin, dmax))
+            self.set_mt(self.dataModel.get('log_data'), depth_range=(dmin, dmax))
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to apply depth range:\n{e}")
         
     
-    def set_mt(self, depth_range=None):
+    def set_mt(self, data:pd.DataFrame, depth_range=None):
         if self.mt is not None:
             self.mt.setParent(None)  # Remove existing widget
             self.mt.deleteLater()
             self.mt = None
-        if not self.log_model.is_loaded:
-            return
-        data = self.log_model.data
+        data = self.dataModel['log_data']
         if depth_range is not None:
             dmin, dmax = depth_range
-            data = self.log_controller.filtered_data(dmin, dmax)
         else:
             dmin = data.iloc[:, 0].min()
             dmax = data.iloc[:, 0].max()
@@ -367,5 +402,4 @@ class MainWindow(QMainWindow):
 
         # Place the multi-track widget in the main window
         self.setCentralWidget(mt)
-        metadata = self.log_model.metadata
-        self.statusBar().showMessage(f"井名: {metadata.get('well_name', '未知')}  深度范围: {metadata.get('depth_range', ('未知', '未知'))}")
+        self.statusBar().showMessage(f"井名: {self.dataModel.get('log_metaInfo', {}).get('well_name', '未知')}  深度范围: {self.dataModel.get('log_metaInfo', {}).get('depth_range', ('未知', '未知'))}")

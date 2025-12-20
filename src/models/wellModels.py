@@ -27,7 +27,7 @@ COLUMN_SPECS = {
 }
 
 
-class LasModels:
+class wellModels:
     @staticmethod
     def read_las_file(file_path):
         """
@@ -111,7 +111,6 @@ class LasModels:
             df.columns = df.columns.str.upper()
             print("df columns:", df.columns)
             # set metadata
-            las.well['UWI'] = lasio.HeaderItem(key, value=value) 
             for key, value in meta_data.items():
                 las.well[key] = lasio.HeaderItem(key, value=value)  
             # add curves
@@ -134,17 +133,17 @@ if __name__ == "__main__":
     # Example usage
     file_path = "data/106.xlsx"
     meta_data = {"WELL": "测试井", "LOC": "Location", "COMP": "Company", "DATE": "2024-06-01", "UWI": "1234567890"}
-    las_file = LasModels.from_file_to_las(file_path, meta_data ,"output/output.las")
+    las_file = wellModels.from_file_to_las(file_path, meta_data ,"output/output.las")
     
     if las_file:
-        well_info = LasModels.get_well_info(las_file)
+        well_info = wellModels.get_well_info(las_file)
         print("Well Information:", well_info)
         
-        depth_range = LasModels.get_depth_range(las_file)
+        depth_range = wellModels.get_depth_range(las_file)
         print("Depth Range:", depth_range)
         
         curve_name = ["AC", "TVD"]
-        curve_data = LasModels.get_curve_data(las_file, curve_name)
+        curve_data = wellModels.get_curve_data(las_file, curve_name)
         if curve_data is not None:
             print(f"Data for curve '{curve_name}':", curve_data)
     

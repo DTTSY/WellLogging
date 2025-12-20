@@ -1,0 +1,1 @@
+uv pip install matablib\PythonPackage1\output\build
