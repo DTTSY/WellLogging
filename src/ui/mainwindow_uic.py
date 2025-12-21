@@ -1,8 +1,7 @@
-from PySide6.QtCore import QSize, Qt, QObject, Signal, QThread
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMainWindow,QToolBar,QStatusBar,QFileDialog,QMessageBox,QLabel
+from PySide6.QtCore import QSize, Qt, QObject, Signal, QThread,QEvent
+from PySide6.QtWidgets import QMainWindow,QFileDialog,QMessageBox,QLabel
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QDoubleSpinBox,QWidget, QProgressDialog
+from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QDoubleSpinBox,QWidget, QProgressDialog , QVBoxLayout
 import pandas as pd
 import os
 from collections import defaultdict
@@ -11,6 +10,7 @@ import traceback
 
 from src.ui.ChartArea import MultiTrackWidget
 from src.ui.DrillingPressureCalculator_window_ui import Ui_w_DrillingPressureCalculator
+from src.ui.mainwindow_ui import Ui_APPMainWindow
 from src.core.algorithm.DrillingPressureCalculator import DrillingPressureCalculator,OperationType
 
 
@@ -190,26 +190,26 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
             QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
             return
 
-class MainWindow(QMainWindow):
+class MainWindow_c(QMainWindow, Ui_APPMainWindow):
     def __init__(self, app):
-        super().__init__()
+        super(MainWindow_c, self).__init__()
+        self.setupUi(self)
         self.app = app #declare an app member
-        self.setWindowTitle("井壁稳定优化系统")
-        # 设置窗口的最小尺寸
         self.setMinimumSize(QSize(1200, 800))
         self.mt = None
         self.dataModel = dict()
 
         #Menubar and menus
-        menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu("文件")
-        # new_action =  file_menu.addAction("New")
-        open_action = file_menu.addAction("导入 地质力学数据")
+        # menu_bar = self.menuBar()
+        # file_menu = menu_bar.addMenu("文件")
+        # # new_action =  file_menu.addAction("New")
+        # open_action = file_menu.addAction("导入 地质力学数据")
 
-        open_d_action = file_menu.addAction("导入 钻井动态数据")
-        open_d_action.triggered.connect(lambda: QMessageBox.warning(self, "导入 钻井动态数据", "方法未实现"))
+        # open_d_action = file_menu.addAction("导入 钻井动态数据")
+
+        self.action_import_DTdata.triggered.connect(lambda: QMessageBox.warning(self, "导入 钻井动态数据", "方法未实现"))
         # open_action.setShortcut("Ctrl+O")
-        open_action.setStatusTip("Open a CSV/text file (value, depth)")
+        # open_action.setStatusTip("Open a CSV/text file (value, depth)")
 
         def open_file():
             fname, _ = QFileDialog.getOpenFileName(self, "Open data file", "", "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)")
@@ -235,79 +235,48 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Format error", "File must have at least two columns (value, depth)")
                 return
             self.set_mt(data)
-
-        open_action.triggered.connect(open_file)
-
-
-        edit_menu =menu_bar.addMenu("稳定性分析")
-        edit_menu.addAction("地质力学静态计算").triggered.connect(lambda: QMessageBox.warning(self, "地质力学静态计算", "方法未实现"))
-        edit_menu.addAction("压力波动动态计算").triggered.connect(self.open_drilling_pressure_calculator)
-        edit_menu.addAction("机械扰动动态计算").triggered.connect(lambda: QMessageBox.warning(self, "机械扰动动态计算", "方法未实现"))
-        # edit_menu.addAction("Undo")
-        # edit_menu.addAction("Redo")
-
-        #A bunch of other menu options just for the fun of it
-        # menu_bar.addMenu("Window")
-        settings_menu = menu_bar.addMenu("设置")
-        settings_menu_action = settings_menu.addAction("首选项")
-        settings_menu_action.triggered.connect(lambda: QMessageBox.warning(self, "首选项", "方法未实现"))
-        menu_bar.addMenu("帮助")
+        self.action_import_Ddata.triggered.connect(open_file)
+        # open_action.triggered.connect(open_file)
 
 
+        # edit_menu =menu_bar.addMenu("稳定性分析")
+        self.action_subp1.triggered.connect(lambda: QMessageBox.warning(self, "地质力学静态计算", "方法未实现"))
+        self.action_subp2.triggered.connect(self.open_drilling_pressure_calculator)
+        self.action_subp3.triggered.connect(lambda: QMessageBox.warning(self, "机械扰动动态计算", "方法未实现"))
+       
 
-        #Working with toolbars
-        toolbar = QToolBar("My main toolbar")
-        toolbar.setIconSize(QSize(20, 20))
-        toolbar.setAllowedAreas(Qt.LeftToolBarArea)
-        toolbar.setOrientation(Qt.Vertical)
-        toolbar.setMinimumWidth(100)
-        self.addToolBar(Qt.LeftToolBarArea, toolbar)
+        # action1 = QAction("调整井深", self)
 
-        #Add the quit action to the toolbar
-        # toolbar.addAction(quit_action)
+        self.pb_adjDepth.clicked.connect(self.adjustDepthValue)
 
-        action1 = QAction("调整井深", self)
-        action1.setStatusTip("Status message for some action")
-        action1.triggered.connect(self.adjustDepthValue)
-        toolbar.addAction(action1)
+        # image = QImage("assets/images/start.jpg")
+        # self.w_ff.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
+        # self.gb_main_left_area.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
+        # 向group box中添加图片
+        # image = QImage("assets/images/start.jpg")
+        # self._left_image_pixmap = image
+        # self.left_image_label = QLabel(self.gb_main_left_area)
+        # self.left_image_label.setAlignment(Qt.AlignCenter)
+        # left_area_layout = QVBoxLayout()
+        # left_area_layout.setContentsMargins(0, 0, 0, 0)
+        # left_area_layout.addWidget(self.left_image_label)
+        # left_area_layout.addWidget(QLabel("欢迎使用井下数据可视化与分析系统",alignment=Qt.AlignmentFlag.AlignCenter))
+        # self.gb_main_left_area.setLayout(left_area_layout)
+        self.gridLayout_main_left.addWidget(QLabel("欢迎使用井下数据可视化与分析系统",alignment=Qt.AlignmentFlag.AlignCenter))
+        # self._update_left_image_pixmap()
+        # self.gb_main_left_area.installEventFilter(self)
 
-        # action2 = QAction(QIcon("start.png"), "Some other action", self)
-        # action2.setStatusTip("Status message for some other action")
-        # action2.triggered.connect(self.toolbar_button_click)
-        # #action2.setCheckable(True)
-        # toolbar.addAction(action2)
+    # def _update_left_image_pixmap(self):
+    #     if hasattr(self, "left_image_label") and hasattr(self, "_left_image_pixmap"):
+    #         target_size = self.gb_main_left_area.size()
+    #         self.left_image_label.setPixmap(
+    #             self._left_image_pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    #         )
 
-        # toolbar.addSeparator()
-        # toolbar.addWidget(QPushButton("Click here"))
-
-
-        # Working with status bars
-        StatusBar = QStatusBar(self)
-        StatusBar.showMessage("Ready")
-        self.setStatusBar(StatusBar)
-
-        # mt = MultiTrackWidget(depth_range=(0, 100))
-        # self.mt = mt
-
-        # # create 5 tracks with sample data
-        # n_tracks = 5
-        # depths = np.linspace(0, 100, 500)
-
-        # titles = [f"Track {i+1}" for i in range(n_tracks)]
-
-        # for i, t in enumerate(titles):
-        #     chart = mt.add_track(t, width=300, show_y_axis=(i == 0), x_range=(0, 1))
-        #     # sample data: a shifted sine + noise per track
-        #     x = 0.5 + 0.4 * np.sin(2 * np.pi * (depths / 100.0) * (i + 1))
-        #     x += 0.05 * np.random.randn(depths.size)
-        #     chart.set_data(x, depths)
-        # # mt.resize(700, 800)
-
-        # # Place the multi-track widget in the main window
-        # self.setCentralWidget(mt)
-        # 显示图片
-        image = QImage("assets/images/start.jpg")
-        self.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
+    # def eventFilter(self, obj, event):
+    #     if obj is self.gb_main_left_area and event.type() == QEvent.Resize:
+    #         self._update_left_image_pixmap()
+    #     return super().eventFilter(obj, event)
 
     def open_drilling_pressure_calculator(self):
         self.dlg = DrillingPressureCalculator_ui()
@@ -333,33 +302,9 @@ class MainWindow(QMainWindow):
         except Exception:
             default_min, default_max = 0.0, 100.0
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("调整深度范围")
-        layout = QFormLayout(dlg)
-
-        spin_min = QDoubleSpinBox(dlg)
-        spin_min.setDecimals(2)
-        spin_min.setRange(-1e12, 1e12)
-        spin_min.setValue(default_min)
-
-        spin_max = QDoubleSpinBox(dlg)
-        spin_max.setDecimals(2)
-        spin_max.setRange(-1e12, 1e12)
-        spin_max.setValue(default_max)
-
-        layout.addRow("起始深度:", spin_min)
-        layout.addRow("终止深度:", spin_max)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addRow(buttons)
-
-        ok = dlg.exec() == QDialog.Accepted
-        dmin = float(spin_min.value())
-        dmax = float(spin_max.value())
-        if not ok:
-            return
+        self.dsp_startDepth.value()
+        dmin = float(self.dsp_startDepth.value())
+        dmax = float(self.dsp_endDepth.value())
         if dmin >= dmax:
             QMessageBox.warning(self, "深度范围错误", "起始深度需小于终止深度")
             return
@@ -383,7 +328,6 @@ class MainWindow(QMainWindow):
             dmin = data.iloc[:, 0].min()
             dmax = data.iloc[:, 0].max()
         mt = MultiTrackWidget(depth_range=(dmin, dmax))
-        self.mt = mt
 
         depths = data.iloc[:, 0].to_numpy()
 
@@ -401,5 +345,10 @@ class MainWindow(QMainWindow):
         mt._tracks_layout.setSpacing(fixed_gap)
 
         # Place the multi-track widget in the main window
-        self.setCentralWidget(mt)
+        # self.setCentralWidget(mt)
+        # if self.mt is None:
+        #     self.gridLayout_main_left.replaceWidget(self.mt, mt)
+        # else:
+        self.mt = mt
+        self.gridLayout_main_left.addWidget(self.mt)
         self.statusBar().showMessage(f"井名: {self.dataModel.get('log_metaInfo', {}).get('well_name', '未知')}  深度范围: {self.dataModel.get('log_metaInfo', {}).get('depth_range', ('未知', '未知'))}")

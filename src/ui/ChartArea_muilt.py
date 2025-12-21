@@ -13,16 +13,20 @@ from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtGui import QPainter
 from PySide6.QtCore import Qt, QPointF, Signal, QObject
 from PySide6.QtWidgets import QApplication, QWidget, QHBoxLayout, QSizePolicy, QScrollArea, QVBoxLayout
+import math
 import sys
+from typing import Sequence, Union
+
 import numpy as np
 import pandas as pd
 
 class TrackChart(QChart):
+
     """Single track chart suitable for well-log style plotting.
 
     Features:
     - One QLineSeries (can be replaced with multiple if needed)
-    - Independent X axis per track
+    - Independent X axis per track 
     - Y axis (depth) can be synchronized with other TrackChart instances
     """
 
@@ -31,20 +35,19 @@ class TrackChart(QChart):
         super().__init__()
         self.setTitle(title)
 
-        # series
-        self.series = QLineSeries()
-        self.addSeries(self.series)
-
         # axes
         self.axisX = QValueAxis()
         self.axisY = QValueAxis()
 
         self.addAxis(self.axisX, Qt.AlignTop)
         self.addAxis(self.axisY, Qt.AlignLeft)
-        self.series.attachAxis(self.axisX)
-        self.series.attachAxis(self.axisY)
 
         self.axisX.setRange(x_min, x_max)
+
+        # series handling
+        self._series_list = []
+        self.series = None
+        self._ensure_single_series()
 
         # depth: top (small) -> bottom (large). Default Qt charts have y increasing upward,
         # to make depth increase downward we reverse the axis if available.
@@ -70,12 +73,39 @@ class TrackChart(QChart):
 
         # Default series pen/visuals can be customized by caller
 
+    def _clear_series(self):
+        for series in self._series_list:
+            self.removeSeries(series)
+        self._series_list.clear()
+        self.series = None
+
+    def _add_series(self, series: QLineSeries):
+        self.addSeries(series)
+        series.attachAxis(self.axisX)
+        series.attachAxis(self.axisY)
+        self._series_list.append(series)
+        if self.series is None:
+            self.series = series
+        return series
+
+    def _ensure_single_series(self):
+        if len(self._series_list) != 1:
+            self._clear_series()
+            series = QLineSeries()
+            self._add_series(series)
+        else:
+            series = self._series_list[0]
+        self.series = series
+        self.legend().hide()
+        return series
+
     def set_data(self, x: np.ndarray, y: np.ndarray):
         """Replace the series data. x and y must be 1D and same length."""
         if len(x) != len(y):
             raise ValueError("x and y must have same length")
+        series = self._ensure_single_series()
         points = [QPointF(float(xi), float(yi)) for xi, yi in zip(x, y)]
-        self.series.replace(points)
+        series.replace(points)
 
     def set_x_range(self, xmin: float, xmax: float):
         self.axisX.setRange(xmin, xmax)
@@ -87,6 +117,60 @@ class TrackChart(QChart):
             self.axisY.setReverse(True)
         except Exception:
             self.axisY.setRange(dmin, dmax)
+
+    def set_dataframe(self, df: pd.DataFrame, value_columns: Union[str, Sequence[str]], depth_column: str):
+        """Plot one or more columns from *df* against *depth_column*."""
+        if isinstance(value_columns, str):
+            columns = [value_columns]
+        else:
+            columns = list(value_columns)
+        if not columns:
+            raise ValueError("value_columns must contain at least one column name")
+
+        required = [depth_column, *columns]
+        missing = [col for col in required if col not in df.columns]
+        if missing:
+            raise KeyError(f"Missing columns in DataFrame: {missing}")
+
+        depth_series = pd.to_numeric(df[depth_column], errors="coerce")
+        valid_depth = depth_series.dropna()
+        if valid_depth.empty:
+            raise ValueError("No valid depth values available for plotting")
+
+        self._clear_series()
+        combined_x = []
+
+        for col in columns:
+            value_series = pd.to_numeric(df[col], errors="coerce")
+            paired = pd.DataFrame({"depth": depth_series, "value": value_series}).dropna()
+            if paired.empty:
+                continue
+            series = QLineSeries()
+            series.setName(col)
+            points = [QPointF(float(v), float(d)) for v, d in zip(paired["value"], paired["depth"])]
+            self._add_series(series)
+            series.replace(points)
+            combined_x.extend(paired["value"].tolist())
+
+        if not self._series_list:
+            raise ValueError("No valid data found for requested columns")
+
+        self.series = self._series_list[0]
+        self.legend().setVisible(len(self._series_list) > 1)
+
+        dmin = float(valid_depth.min())
+        dmax = float(valid_depth.max())
+        self.set_depth_range(dmin, dmax)
+
+        x_values = [float(x) for x in combined_x if not math.isnan(float(x)) and math.isfinite(float(x))]
+        if x_values:
+            xmin = min(x_values)
+            xmax = max(x_values)
+            if math.isclose(xmin, xmax):
+                pad = abs(xmin) * 0.01 or 1.0
+                xmin -= pad
+                xmax += pad
+            self.axisX.setRange(xmin, xmax)
 
 
 class MultiTrackWidget(QWidget):
@@ -152,6 +236,65 @@ class MultiTrackWidget(QWidget):
         for chart, _ in self.tracks:
             chart.set_depth_range(dmin, dmax)
 
+    def clear_tracks(self):
+        while self.tracks:
+            chart, view = self.tracks.pop()
+            self._tracks_layout.removeWidget(view)
+            view.setParent(None)
+            view.deleteLater()
+        self._update_container_width()
+
+    def plot_dataframe(self, df: pd.DataFrame, track_specs, depth_column=None, widths=None):
+        """Create tracks based on the provided *track_specs* sequence."""
+        if depth_column is None:
+            if not track_specs:
+                raise ValueError("track_specs must contain at least the depth column")
+            depth_column = track_specs[0]
+            value_specs = track_specs[1:]
+        else:
+            value_specs = track_specs
+
+        if not value_specs:
+            raise ValueError("No value tracks specified")
+
+        if isinstance(widths, int):
+            resolved_widths = [widths] * len(value_specs)
+        elif widths is None:
+            resolved_widths = [200] * len(value_specs)
+        else:
+            resolved_widths = list(widths)
+            if len(resolved_widths) != len(value_specs):
+                raise ValueError("Length of widths must match number of value tracks")
+
+        depth_series = pd.to_numeric(df[depth_column], errors="coerce").dropna()
+        if depth_series.empty:
+            raise ValueError("Depth column contains no valid numbers")
+
+        dmin = float(depth_series.min())
+        dmax = float(depth_series.max())
+        self._depth_min = dmin
+        self._depth_max = dmax
+
+        self.clear_tracks()
+
+        charts = []
+        for idx, spec in enumerate(value_specs):
+            if isinstance(spec, str):
+                columns = spec
+                title = spec
+            else:
+                columns = list(spec)
+                if not columns:
+                    continue
+                title = " / ".join(columns)
+
+            width = resolved_widths[idx]
+            chart = self.add_track(title, width=width, show_y_axis=(idx == 0))
+            chart.set_dataframe(df, columns, depth_column)
+            charts.append(chart)
+
+        return charts
+
     def _update_container_width(self):
         # Sum the fixed widths plus layout spacing to ensure the scroll area knows the real width
         spacing = self._tracks_layout.spacing() * max(len(self.tracks) - 1, 0)
@@ -174,24 +317,20 @@ class MultiTrackWidget(QWidget):
 def _demo():
     app = QApplication(sys.argv)
 
-    # create multi-track widget
-    mt = MultiTrackWidget(depth_range=(0, 100))
-    df = pd.read_excel("data\X3.xlsx")
-    print("df columns in demo:", df.info())
-    pass
-    # create 5 tracks with sample data
-    n_tracks = 5
-    depths = np.linspace(0, 100, 500)
+    # create multi-track widget and demo DataFrame
+    mt = MultiTrackWidget()
+    depth = np.linspace(1200, 1500, 300)
+    df = pd.DataFrame({
+        "MD": depth,
+        "GR": 60 + 25 * np.sin(depth / 25),
+        "RHOB": 2.3 + 0.05 * np.cos(depth / 35),
+        "M2R1": 4 + np.sin(depth / 18),
+        "M2R9": 6 + np.cos(depth / 22),
+        "TVD": depth - 8 * np.sin(depth / 45),
+    })
 
-    titles = [f"Track {i+1}" for i in range(n_tracks)]
-    widths = [100, 110, 110, 110, 100]
-
-    for i, (t, w) in enumerate(zip(titles, widths)):
-        chart = mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, 1))
-        # sample data: a shifted sine + noise per track
-        x = 0.5 + 0.4 * np.sin(2 * np.pi * (depths / 100.0) * (i + 1))
-        x += 0.05 * np.random.randn(depths.size)
-        chart.set_data(x, depths)
+    tracks = ["MD", "GR", "RHOB", ["M2R1", "M2R9"], "TVD"]
+    mt.plot_dataframe(df, tracks)
 
     mt.setWindowTitle("Multi-track well log demo")
     

@@ -131,8 +131,8 @@ class wellModels:
 
 if __name__ == "__main__":
     # Example usage
-    file_path = "data/106.xlsx"
-    meta_data = {"WELL": "测试井", "LOC": "Location", "COMP": "Company", "DATE": "2024-06-01", "UWI": "1234567890"}
+    file_path = "data/X3.xlsx"
+    meta_data = {"WELL": "测试井", "LOC": "Location", "COMP": "Company", "DATE": "2024-06-01", "UWI": "1234567890",'NULL': -9999}
     las_file = wellModels.from_file_to_las(file_path, meta_data ,"output/output.las")
     
     if las_file:
@@ -150,12 +150,31 @@ if __name__ == "__main__":
         # well = Well.from_lasio(las_file)
     
     well = Well.from_las("output/output.las")
+    # well = Well.from_las('https://geocomp.s3.amazonaws.com/data/P-129.LAS')
+#     remap = {
+#     'UWI': 'LIC',  # Commonly used unique name; not a true UWI.
+#     'KB': 'EKB',
+#     'TD': 'TDD',  # Driller's TD.
+#     'LATI': 'LOC',
+#     'LONG': 'UWI',
+#     'SECT': None,
+#     'TOWN': None,
+#     'LOC': None
+# }
+
+    # well = Well.from_las('https://geocomp.s3.amazonaws.com/data/P-129.LAS', remap=remap)
     print(well.header)
+    print(well.data)
     df = well.df()
     print(df.info())
     print(well.header)
     # print(well.get_alias())
-    well.plot()
+    # 设置字体为支持中文
+    # plt.rcParams['font.sans-serif'] = ['SimHei']  # 黑体
+    trck_name = ['TVD','AC','DEN','E','C','FI',['SIGMMA_V1','SIGMMA_H1','SIGMMA_HH1'],'TVD']
+    fig = well.plot(tracks=trck_name)
+    fig.show()
+    fig.savefig("output/well_plot.png")
     # print(df.head(4))
     # AC = well.data['AC']
     # print(AC.describe())
@@ -164,6 +183,6 @@ if __name__ == "__main__":
     # tracks = ['AC','SH',['TOC', 'TOC2']]
     # well.plot(tracks=tracks)
     # plt.savefig("output/well_plot.png")
-    plt.show()
+    # plt.show()
 
     # well.plot_2d(logs=curve_name)
