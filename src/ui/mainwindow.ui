@@ -57,7 +57,7 @@
           </size>
          </property>
          <property name="currentIndex">
-          <number>0</number>
+          <number>1</number>
          </property>
          <widget class="QWidget" name="page">
           <property name="geometry">
@@ -140,14 +140,40 @@
            </rect>
           </property>
           <attribute name="label">
-           <string>Page 2</string>
+           <string>地质力学静态计算</string>
           </attribute>
           <layout class="QGridLayout" name="gridLayout">
            <item row="0" column="0">
             <widget class="QGroupBox" name="groupBox_4">
              <property name="title">
-              <string>GroupBox</string>
+              <string/>
              </property>
+             <property name="alignment">
+              <set>Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop</set>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_2">
+              <item>
+               <widget class="QPushButton" name="pb_homorock">
+                <property name="text">
+                 <string>斜井坍塌压力剖面计算</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="pb_added_homorock">
+                <property name="text">
+                 <string>叠加振动坍塌压力计算</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="pb_drilling_velocity">
+                <property name="text">
+                 <string>碰撞速度仿真计算</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
             </widget>
            </item>
           </layout>

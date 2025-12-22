@@ -1,7 +1,8 @@
 import lasio
-from welly import Well
+# from welly import Well
 import welly
 import pandas as pd
+from pathlib import Path
 import matplotlib.pyplot as plt
 
 
@@ -128,6 +129,34 @@ class wellModels:
         except Exception as e:
             print(f"Error converting CSV to LAS: {e}")
             return None
+
+class Well:
+    def __init__(self):
+        self.static_data = None
+        self.dynamic_data = None
+        self.header = {}
+
+
+    def read_tableFile(self, table_file_path):
+        ext = Path(table_file_path).suffix.lower()
+        readers = {
+            ".csv": pd.read_csv,
+            ".xls": pd.read_excel,
+            ".xlsx": pd.read_excel,
+            ".parquet": pd.read_parquet,
+        }
+        try:
+            reader = readers[ext]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported table format: {ext}") from exc
+        return reader(table_file_path)
+    
+    def set_static_data(self, data):
+        self.static_data = data
+    def set_dynamic_data(self, data):
+        self.dynamic_data = data
+
+
 
 if __name__ == "__main__":
     # Example usage

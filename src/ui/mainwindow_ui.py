@@ -111,10 +111,28 @@ class Ui_APPMainWindow(object):
         self.gridLayout.setObjectName(u"gridLayout")
         self.groupBox_4 = QGroupBox(self.page_2)
         self.groupBox_4.setObjectName(u"groupBox_4")
+        self.groupBox_4.setAlignment(Qt.AlignmentFlag.AlignLeading|Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop)
+        self.verticalLayout_2 = QVBoxLayout(self.groupBox_4)
+        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.pb_homorock = QPushButton(self.groupBox_4)
+        self.pb_homorock.setObjectName(u"pb_homorock")
+
+        self.verticalLayout_2.addWidget(self.pb_homorock)
+
+        self.pb_added_homorock = QPushButton(self.groupBox_4)
+        self.pb_added_homorock.setObjectName(u"pb_added_homorock")
+
+        self.verticalLayout_2.addWidget(self.pb_added_homorock)
+
+        self.pb_drilling_velocity = QPushButton(self.groupBox_4)
+        self.pb_drilling_velocity.setObjectName(u"pb_drilling_velocity")
+
+        self.verticalLayout_2.addWidget(self.pb_drilling_velocity)
+
 
         self.gridLayout.addWidget(self.groupBox_4, 0, 0, 1, 1)
 
-        self.toolBox.addItem(self.page_2, u"Page 2")
+        self.toolBox.addItem(self.page_2, u"\u5730\u8d28\u529b\u5b66\u9759\u6001\u8ba1\u7b97")
 
         self.verticalLayout.addWidget(self.toolBox)
 
@@ -163,7 +181,7 @@ class Ui_APPMainWindow(object):
 
         self.retranslateUi(APPMainWindow)
 
-        self.toolBox.setCurrentIndex(0)
+        self.toolBox.setCurrentIndex(1)
 
 
         QMetaObject.connectSlotsByName(APPMainWindow)
@@ -187,8 +205,11 @@ class Ui_APPMainWindow(object):
         self.label_2.setText(QCoreApplication.translate("APPMainWindow", u"\u622a\u6b62\u6df1\u5ea6 (m)", None))
         self.pb_adjDepth.setText(QCoreApplication.translate("APPMainWindow", u"\u8c03\u6574", None))
         self.toolBox.setItemText(self.toolBox.indexOf(self.page), QCoreApplication.translate("APPMainWindow", u"\u6df1\u5ea6\u8c03\u6574", None))
-        self.groupBox_4.setTitle(QCoreApplication.translate("APPMainWindow", u"GroupBox", None))
-        self.toolBox.setItemText(self.toolBox.indexOf(self.page_2), QCoreApplication.translate("APPMainWindow", u"Page 2", None))
+        self.groupBox_4.setTitle("")
+        self.pb_homorock.setText(QCoreApplication.translate("APPMainWindow", u"\u659c\u4e95\u574d\u584c\u538b\u529b\u5256\u9762\u8ba1\u7b97", None))
+        self.pb_added_homorock.setText(QCoreApplication.translate("APPMainWindow", u"\u53e0\u52a0\u632f\u52a8\u574d\u584c\u538b\u529b\u8ba1\u7b97", None))
+        self.pb_drilling_velocity.setText(QCoreApplication.translate("APPMainWindow", u"\u78b0\u649e\u901f\u5ea6\u4eff\u771f\u8ba1\u7b97", None))
+        self.toolBox.setItemText(self.toolBox.indexOf(self.page_2), QCoreApplication.translate("APPMainWindow", u"\u5730\u8d28\u529b\u5b66\u9759\u6001\u8ba1\u7b97", None))
         self.gb_main_left_area.setTitle("")
         self.menu_file.setTitle(QCoreApplication.translate("APPMainWindow", u"\u6587\u4ef6", None))
         self.menu_subp.setTitle(QCoreApplication.translate("APPMainWindow", u"\u7a33\u5b9a\u6027\u5206\u6790", None))

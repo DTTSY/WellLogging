@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSize, Qt, QObject, Signal, QThread,QEvent
+from PySide6.QtCore import QSize, Qt, QObject, Signal, QThread,QEvent,QThreadPool
 from PySide6.QtWidgets import QMainWindow,QFileDialog,QMessageBox,QLabel
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QDoubleSpinBox,QWidget, QProgressDialog , QVBoxLayout
@@ -12,7 +12,9 @@ from src.ui.ChartArea import MultiTrackWidget
 from src.ui.DrillingPressureCalculator_window_ui import Ui_w_DrillingPressureCalculator
 from src.ui.mainwindow_ui import Ui_APPMainWindow
 from src.core.algorithm.DrillingPressureCalculator import DrillingPressureCalculator,OperationType
-
+from src.models.wellModels import Well
+from src.core.algorithm.CalculateForHomorock import HomorockCalculationThread, HomorockTask
+from PySide6.QtCore import QTimer
 
 class CalculationWorker(QObject):
     progress = Signal(int, str, float)
@@ -58,10 +60,12 @@ class CalculationWorker(QObject):
             self.error.emit(message)
 
 class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
+    submitted = Signal()
     def __init__(self, parent=None,mw=None):
         super(DrillingPressureCalculator_ui, self).__init__(parent)
         self.setupUi(self)
         self.mw = mw
+        self.set
         # Additional initialization code can go here
         self.calculator = DrillingPressureCalculator()
         self.pb_open_main.clicked.connect(lambda : self.open_file('main_data'))
@@ -151,6 +155,7 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
 
     def _handle_calculation_finished(self, df: pd.DataFrame, elapsed: float):
         self.model['result'] = df
+        self.submitted.emit(self.model['result'])
         if self._progress_dialog is not None:
             self._progress_dialog.setValue(100)
             self._progress_dialog.setLabelText(f"已保存结果\n总耗时: {elapsed:.2f} 秒")
@@ -190,14 +195,20 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
             QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
             return
 
-class MainWindow_c(QMainWindow, Ui_APPMainWindow):
+
+class MainWindow(QMainWindow, Ui_APPMainWindow):
     def __init__(self, app):
-        super(MainWindow_c, self).__init__()
+        super(MainWindow, self).__init__()
         self.setupUi(self)
         self.app = app #declare an app member
         self.setMinimumSize(QSize(1200, 800))
+        self.dlg = DrillingPressureCalculator_ui()
+        self.dlg.submitted.connect(self.set_mt)
+        self.homorockCalculationThread = HomorockCalculationThread()
+
         self.mt = None
-        self.dataModel = dict()
+        # self.dataModel = dict()
+        self.well = Well()
 
         #Menubar and menus
         # menu_bar = self.menuBar()
@@ -217,13 +228,15 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
                 return
             try:
                 # data = np.loadtxt(fname, delimiter=',')
-                metaInfo = dict()
-                metaInfo['well_name'] = os.path.basename(fname).split('.')[0]
-                data =  pd.read_csv(fname)
-                metaInfo['depth_range'] = (float(data.iloc[:,0].min()), float(data.iloc[:,0].max()))
+                # metaInfo = dict()
+                self.well.header['well_name'] = os.path.basename(fname).split('.')[0]
+                data =  self.well.read_tableFile(fname)
+                self.well.header['depth_range'] = (float(data.iloc[:,0].min()), float(data.iloc[:,0].max()))
                 self.statusBar().showMessage(f"Loaded file: {os.path.basename(fname)}", 5000)
-                self.dataModel['log_data'] = data
-                self.dataModel['log_metaInfo'] = metaInfo
+                # self.dataModel['log_data'] = data
+                self.well.set_static_data(data)
+                # self.well.header = metaInfo
+                # self.dataModel['log_metaInfo'] = metaInfo
             except Exception as e:
                 QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
                 return
@@ -234,7 +247,7 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
             if data.shape[1] < 2:
                 QMessageBox.warning(self, "Format error", "File must have at least two columns (value, depth)")
                 return
-            self.set_mt(data)
+            self.set_mt(self.well.static_data)
         self.action_import_Ddata.triggered.connect(open_file)
         # open_action.triggered.connect(open_file)
 
@@ -246,40 +259,128 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
        
 
         # action1 = QAction("调整井深", self)
-
         self.pb_adjDepth.clicked.connect(self.adjustDepthValue)
 
-        # image = QImage("assets/images/start.jpg")
-        # self.w_ff.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
-        # self.gb_main_left_area.setCentralWidget(QLabel(pixmap=QPixmap.fromImage(image)))
-        # 向group box中添加图片
-        # image = QImage("assets/images/start.jpg")
-        # self._left_image_pixmap = image
-        # self.left_image_label = QLabel(self.gb_main_left_area)
-        # self.left_image_label.setAlignment(Qt.AlignCenter)
-        # left_area_layout = QVBoxLayout()
-        # left_area_layout.setContentsMargins(0, 0, 0, 0)
-        # left_area_layout.addWidget(self.left_image_label)
-        # left_area_layout.addWidget(QLabel("欢迎使用井下数据可视化与分析系统",alignment=Qt.AlignmentFlag.AlignCenter))
-        # self.gb_main_left_area.setLayout(left_area_layout)
-        self.gridLayout_main_left.addWidget(QLabel("欢迎使用井下数据可视化与分析系统",alignment=Qt.AlignmentFlag.AlignCenter))
-        # self._update_left_image_pixmap()
-        # self.gb_main_left_area.installEventFilter(self)
+    def HomorockCalculation(self, task):
+        if self.well.static_data is None:
+            QMessageBox.warning(self, "数据缺失", "未导入有效数据")
+            return
 
-    # def _update_left_image_pixmap(self):
-    #     if hasattr(self, "left_image_label") and hasattr(self, "_left_image_pixmap"):
-    #         target_size = self.gb_main_left_area.size()
-    #         self.left_image_label.setPixmap(
-    #             self._left_image_pixmap.scaled(target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-    #         )
+        start_time = perf_counter()
 
-    # def eventFilter(self, obj, event):
-    #     if obj is self.gb_main_left_area and event.type() == QEvent.Resize:
-    #         self._update_left_image_pixmap()
-    #     return super().eventFilter(obj, event)
+        # Timer to update status bar with elapsed time
+        timer = QTimer(self)
+        timer.setInterval(500)
+        def _update_status():
+            elapsed = perf_counter() - start_time
+            self.statusBar().showMessage(f"同质岩计算中... 耗时: {elapsed:.1f} 秒")
+        timer.timeout.connect(_update_status)
+
+        class _Worker(QObject):
+            finished = Signal(pd.DataFrame)
+            error = Signal(str)
+
+            def __init__(self, task, static_data):
+                super().__init__()
+                self.task = task
+                self.static_data = static_data
+
+            def run(self):
+                try:
+                    if isinstance(self.task, HomorockCalculationThread):
+                        t = self.task
+                    else:
+                        t = HomorockCalculationThread(self.task)
+
+                    if hasattr(t, "run"):
+                        try:
+                            t.run(self.static_data)
+                        except TypeError:
+                            df = pd.DataFrame()
+                            raise RuntimeError("HomorockCalculationThread run() method has incorrect signature")
+                    else:
+                        raise RuntimeError("HomorockCalculationThread has no run() method")
+
+                    self.finished.emit(df)
+                except Exception:
+                    self.error.emit(traceback.format_exc())
+
+        def _handle_homorock_finished(df: pd.DataFrame, thread: QThread, worker: QObject, start_time_local: float):
+            try:
+                if hasattr(self, '_homorock_timer') and self._homorock_timer:
+                    try:
+                        self._homorock_timer.stop()
+                        self._homorock_timer.deleteLater()
+                    except Exception:
+                        pass
+                    self._homorock_timer = None
+
+                elapsed = perf_counter() - start_time_local
+                self.statusBar().showMessage(f"同质岩计算完成，耗时: {elapsed:.2f} 秒", 10000)
+
+                try:
+                    self.set_mt(df)
+                except Exception:
+                    try:
+                        self.well.set_static_data(df)
+                        self.set_mt(self.well.static_data)
+                    except Exception:
+                        pass
+
+                QMessageBox.information(self, "计算完成", "同质岩计算完成并已绘图。")
+            finally:
+                try:
+                    worker.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    thread.quit()
+                except Exception:
+                    pass
+                self._homorock_thread = None
+                self._homorock_worker = None
+
+        def _handle_homorock_error(message: str, thread: QThread, worker: QObject, start_time_local: float):
+            if hasattr(self, '_homorock_timer') and self._homorock_timer:
+                try:
+                    self._homorock_timer.stop()
+                    self._homorock_timer.deleteLater()
+                except Exception:
+                    pass
+                self._homorock_timer = None
+            elapsed = perf_counter() - start_time_local
+            self.statusBar().showMessage(f"同质岩计算失败，已停止。耗时: {elapsed:.2f} 秒", 10000)
+            QMessageBox.critical(self, "计算失败", f"同质岩计算失败:\n{message}")
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            try:
+                thread.quit()
+            except Exception:
+                pass
+            self._homorock_thread = None
+            self._homorock_worker = None
+
+        thread = QThread(self)
+        worker = _Worker(task, self.well.static_data)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda df: _handle_homorock_finished(df, thread, worker, start_time))
+        worker.error.connect(lambda msg: _handle_homorock_error(msg, thread, worker, start_time))
+
+        thread.finished.connect(thread.deleteLater)
+
+        # keep refs for potential cancellation/inspection
+        self._homorock_thread = thread
+        self._homorock_worker = worker
+        self._homorock_timer = timer
+
+        timer.start()
+        thread.start()
 
     def open_drilling_pressure_calculator(self):
-        self.dlg = DrillingPressureCalculator_ui()
         self.dlg.show()
 
     def quit_app(self):
@@ -290,17 +391,11 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
     
     def adjustDepthValue(self):
         # 打开一个对话课框，获取用户输入的深度值，最大值和最小值
-        if 'log_data' not in self.dataModel:
+        if self.well.static_data is None:
             QMessageBox.warning(self, "数据缺失", "未导入有效数据")
             return
 
         # determine sensible defaults
-        data = self.dataModel.get('log_data')
-        try:
-            default_min = float(data.iloc[:, 0].min())
-            default_max = float(data.iloc[:, 0].max())
-        except Exception:
-            default_min, default_max = 0.0, 100.0
 
         self.dsp_startDepth.value()
         dmin = float(self.dsp_startDepth.value())
@@ -310,8 +405,8 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
             return
 
         try:
-            self.set_mt(self.dataModel.get('log_data'), depth_range=(dmin, dmax))
-            
+            self.set_mt(self.well.static_data, depth_range=(dmin, dmax))
+
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to apply depth range:\n{e}")
         
@@ -321,7 +416,7 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
             self.mt.setParent(None)  # Remove existing widget
             self.mt.deleteLater()
             self.mt = None
-        data = self.dataModel['log_data']
+        # data = self.dataModel['log_data']
         if depth_range is not None:
             dmin, dmax = depth_range
         else:
@@ -351,4 +446,4 @@ class MainWindow_c(QMainWindow, Ui_APPMainWindow):
         # else:
         self.mt = mt
         self.gridLayout_main_left.addWidget(self.mt)
-        self.statusBar().showMessage(f"井名: {self.dataModel.get('log_metaInfo', {}).get('well_name', '未知')}  深度范围: {self.dataModel.get('log_metaInfo', {}).get('depth_range', ('未知', '未知'))}")
+        self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {self.well.header.get('depth_range', ('未知', '未知'))}")
