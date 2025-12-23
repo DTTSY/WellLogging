@@ -19,7 +19,8 @@ from PySide6.QtGui import (QAction, QBrush, QColor, QConicalGradient,
 from PySide6.QtWidgets import (QApplication, QDoubleSpinBox, QFormLayout, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMenu, QMenuBar, QPushButton, QSizePolicy,
-    QStatusBar, QToolBox, QVBoxLayout, QWidget)
+    QSpacerItem, QStatusBar, QToolBox, QVBoxLayout,
+    QWidget)
 
 class Ui_APPMainWindow(object):
     def setupUi(self, APPMainWindow):
@@ -128,6 +129,10 @@ class Ui_APPMainWindow(object):
         self.pb_drilling_velocity.setObjectName(u"pb_drilling_velocity")
 
         self.verticalLayout_2.addWidget(self.pb_drilling_velocity)
+
+        self.verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+
+        self.verticalLayout_2.addItem(self.verticalSpacer)
 
 
         self.gridLayout.addWidget(self.groupBox_4, 0, 0, 1, 1)

@@ -1058,6 +1058,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyqtgraph"
+version = "0.14.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "colorama" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.3.5", source = { registry = "https://mirrors.aliyun.com/pypi/simple" }, marker = "python_full_version >= '3.11'" },
+]
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/32/36/4c242f81fdcbfa4fb62a5645f6af79191f4097a0577bd5460c24f19cc4ef/pyqtgraph-0.14.0-py3-none-any.whl", hash = "sha256:7abb7c3e17362add64f8711b474dffac5e7b0e9245abdf992e9a44119b7aa4f5" },
+]
+
+[[package]]
 name = "pyside6"
 version = "6.10.1"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -1380,6 +1393,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "openpyxl" },
     { name = "pyinstaller" },
+    { name = "pyqtgraph" },
     { name = "pyside6" },
     { name = "qt-material" },
     { name = "welly" },
@@ -1389,6 +1403,7 @@ dependencies = [
 requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pyinstaller", specifier = ">=6.17.0" },
+    { name = "pyqtgraph", specifier = ">=0.14.0" },
     { name = "pyside6", specifier = ">=6.10.1" },
     { name = "qt-material", specifier = ">=2.17" },
     { name = "welly", specifier = ">=0.5.2" },

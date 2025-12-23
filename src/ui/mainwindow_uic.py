@@ -8,7 +8,7 @@ from collections import defaultdict
 from time import perf_counter
 import traceback
 
-from src.ui.ChartArea import MultiTrackWidget
+from src.ui.ChartArea_muilt import MultiTrackWidget
 from src.ui.DrillingPressureCalculator_window_ui import Ui_w_DrillingPressureCalculator
 from src.ui.mainwindow_ui import Ui_APPMainWindow
 from src.core.algorithm.DrillingPressureCalculator import DrillingPressureCalculator,OperationType
@@ -65,7 +65,7 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         super(DrillingPressureCalculator_ui, self).__init__(parent)
         self.setupUi(self)
         self.mw = mw
-        self.set
+        # self.set
         # Additional initialization code can go here
         self.calculator = DrillingPressureCalculator()
         self.pb_open_main.clicked.connect(lambda : self.open_file('main_data'))
@@ -180,7 +180,7 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
 
 
     def open_file(self,file_type:str):
-        fname, _ = QFileDialog.getOpenFileName(self, "Open main data file", "", "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)")
+        fname, _ = QFileDialog.getOpenFileName(self, "Open main data file", "", "Table Files (*.csv,*.xls,*.xlsx,*.parquet);;Text Files (*.txt);;All Files (*)")
         if not fname:
             QMessageBox.information(self, "No File Selected", "No file was selected.")
             return
@@ -204,7 +204,9 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         self.setMinimumSize(QSize(1200, 800))
         self.dlg = DrillingPressureCalculator_ui()
         self.dlg.submitted.connect(self.set_mt)
-        self.homorockCalculationThread = HomorockCalculationThread()
+        self.timer: QTimer = None
+
+        # self.homorockCalculationThread = HomorockCalculationThread(self.well.static_data)
 
         self.mt = None
         # self.dataModel = dict()
@@ -260,6 +262,52 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
 
         # action1 = QAction("调整井深", self)
         self.pb_adjDepth.clicked.connect(self.adjustDepthValue)
+        self.pb_homorock.clicked.connect(lambda: self.runHomorockCalculationThread(HomorockTask.BASE))
+        self.pb_added_homorock.clicked.connect(lambda: self.runHomorockCalculationThread(HomorockTask.ADDED))
+        self.pb_drilling_velocity.clicked.connect(lambda: self.runHomorockCalculationThread(HomorockTask.DRILLING_VELOCITY))
+
+
+    def runHomorockCalculationThread(self, task: HomorockTask):
+        if self.well.static_data is None:
+            QMessageBox.warning(self, "数据缺失", "未导入有效数据")
+            return
+        if self.timer is not None:
+            QMessageBox.information(self, "计算进行中", "请等待当前计算完成。")
+            return
+        self.timer = QTimer(self)
+        self.timer.setInterval(500)
+        start_time = perf_counter()
+        def _update_status():
+            elapsed = perf_counter() - start_time
+            self.statusBar().showMessage(f"{task}计算中... 耗时: {elapsed:.1f} 秒")
+        def _handle_homorock_result(df: pd.DataFrame, elapsed: float):
+            try:
+                # self.set_mt(df)
+                for i, t in enumerate(df.columns):
+                    w=300
+                    chart = self.mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, df[t].max()))
+                    # sample data: a shifted sine + noise per track
+                    x = df[t].to_numpy()
+                    chart.set_data(x, self.well.static_data.iloc[:, 0].to_numpy())
+                # self.mt.add_track(title=f"{task} 计算结果")
+                self.timer.stop()
+                self.timer.deleteLater()
+                self.timer = None
+                QMessageBox.information(self, "计算完成", f"{task}: 计算完成，耗时: {elapsed:.2f} 秒")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set data:\n{e}")
+
+        def _handle_homorock_error(message: str):
+            self.timer.stop()
+            self.statusBar().showMessage(f"计算失败，已停止。", 10000)
+            QMessageBox.critical(self, f"{task}计算失败", f"计算失败:\n{message}")
+
+        self.timer.timeout.connect(_update_status)
+        self.timer.start()
+        thread = HomorockCalculationThread(self.well.static_data, task)
+        thread.result_ready.connect(_handle_homorock_result)
+        thread.error_occurred.connect(_handle_homorock_error)
+        thread.start()
 
     def HomorockCalculation(self, task):
         if self.well.static_data is None:
@@ -279,6 +327,7 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         class _Worker(QObject):
             finished = Signal(pd.DataFrame)
             error = Signal(str)
+            getResult = Signal()
 
             def __init__(self, task, static_data):
                 super().__init__()
@@ -290,11 +339,11 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
                     if isinstance(self.task, HomorockCalculationThread):
                         t = self.task
                     else:
-                        t = HomorockCalculationThread(self.task)
+                        t = HomorockCalculationThread(self.static_data, self.task)
 
                     if hasattr(t, "run"):
                         try:
-                            t.run(self.static_data)
+                            t.run()
                         except TypeError:
                             df = pd.DataFrame()
                             raise RuntimeError("HomorockCalculationThread run() method has incorrect signature")
@@ -405,7 +454,9 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
             return
 
         try:
-            self.set_mt(self.well.static_data, depth_range=(dmin, dmax))
+            # self.set_mt(self.well.static_data, depth_range=(dmin, dmax))
+            self.mt.set_depth_range(dmin, dmax)
+            self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {dmin} - {dmax}")
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to apply depth range:\n{e}")
@@ -436,8 +487,8 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
             chart.set_data(x, depths)
         # mt.resize(700, 800)
         # 固定子图之间的水平间隔（像素）
-        fixed_gap = 2
-        mt._tracks_layout.setSpacing(fixed_gap)
+        # fixed_gap = 2
+        # mt._tracks_layout.setSpacing(fixed_gap)
 
         # Place the multi-track widget in the main window
         # self.setCentralWidget(mt)
@@ -447,3 +498,4 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         self.mt = mt
         self.gridLayout_main_left.addWidget(self.mt)
         self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {self.well.header.get('depth_range', ('未知', '未知'))}")
+    
