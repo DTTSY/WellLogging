@@ -58,6 +58,7 @@ class HomorockCalculationThread(QThread):
 
     def run(self) -> None:
         calculator = None
+        result = 'noresult'
         try:
             calculator = CalculateForHomorock()
             start = perf_counter()
@@ -70,9 +71,11 @@ class HomorockCalculationThread(QThread):
             else:
                 raise ValueError("Unsupported homorock task")
             elapsed = perf_counter() - start
+            if not isinstance(result, pd.DataFrame):
+                raise ValueError("HomorockTask did not return a DataFrame")
             self.result_ready.emit(result, elapsed)
         except Exception as exc:
-            self.error_occurred.emit(str(exc))
+            self.error_occurred.emit(f'msg: {result}\n{str(exc)}')
         finally:
             if calculator is not None:
                 calculator.terminate()

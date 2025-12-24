@@ -3,8 +3,8 @@ import lasio
 # import welly
 import pandas as pd
 from pathlib import Path
-import matplotlib.pyplot as plt
-from PySide6.QtCore import QAbstractTableModel
+
+import duckdb
 
 
 COLUMN_SPECS = {
@@ -136,6 +136,9 @@ class Well:
         self.static_data = None
         self.dynamic_data = None
         self.header = {}
+        self._duckdb_con = duckdb.connect(database=":memory:")
+        self._excel_extension_loaded = False
+        self._table_name = None
 
 
     def read_tableFile(self, table_file_path):
@@ -150,14 +153,66 @@ class Well:
             reader = readers[ext]
         except KeyError as exc:
             raise ValueError(f"Unsupported table format: {ext}") from exc
-        return reader(table_file_path)
+        return reader(table_file_path).astype(float)
     
     def set_static_data(self, data):
         self.static_data = data
     def set_dynamic_data(self, data):
         self.dynamic_data = data
 
+    def read_tableFile_duckdb(self, table_file_path):
+        ext = Path(table_file_path).suffix.lower()
+        normalized_path = str(Path(table_file_path).resolve())
+        table_name = "well_data"
+        table_identifier = duckdb.escape_identifier(table_name)
 
+        if ext == ".csv":
+            self._duckdb_con.execute(
+                f"CREATE OR REPLACE TEMP TABLE {table_identifier} AS SELECT * FROM read_csv_auto(?)",
+                [normalized_path],
+            )
+        elif ext in {".xls", ".xlsx"}:
+            self._ensure_excel_extension()
+            self._duckdb_con.execute(
+                f"CREATE OR REPLACE TEMP TABLE {table_identifier} AS SELECT * FROM read_excel(?)",
+                [normalized_path],
+            )
+        elif ext == ".parquet":
+            self._duckdb_con.execute(
+                f"CREATE OR REPLACE TEMP TABLE {table_identifier} AS SELECT * FROM read_parquet(?)",
+                [normalized_path],
+            )
+        else:
+            raise ValueError(f"Unsupported table format: {ext}")
+
+        self._table_name = table_name
+        df = self._duckdb_con.execute(f"SELECT * FROM {table_identifier}").df().astype(float)
+        return df
+
+    def get_dataframe_by_depth(self, depth_min, depth_max, depth_column=None):
+        if not self._table_name:
+            raise RuntimeError("No table has been loaded")
+        depth_col = depth_column
+        if depth_col is None:
+            if self.static_data is None:
+                depth_col = "DEPTH"
+            else:
+                depth_col = self.static_data.columns[0]
+        table_identifier = duckdb.escape_identifier(self._table_name)
+        depth_identifier = duckdb.escape_identifier(depth_col)
+        query = (
+            f"SELECT * FROM {table_identifier} "
+            f"WHERE {depth_identifier} BETWEEN ? AND ? "
+            f"ORDER BY {depth_identifier}"
+        )
+        return self._duckdb_con.execute(query, [depth_min, depth_max]).df().astype(float)
+
+    def _ensure_excel_extension(self):
+        if not self._excel_extension_loaded:
+            # excel extension is required for DuckDB to read xls/xlsx files
+            self._duckdb_con.execute("INSTALL 'excel'")
+            self._duckdb_con.execute("LOAD 'excel'")
+            self._excel_extension_loaded = True
 
 if __name__ == "__main__":
     # Example usage

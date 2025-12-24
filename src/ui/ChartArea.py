@@ -72,12 +72,20 @@ class TrackChart(pg.PlotWidget):
         # plot.setXRange(x_min, x_max, padding=0)
         plot.setYRange(depth_min, depth_max, padding=0)
         plot.getAxis("left").enableAutoSIPrefix(False)
-        plot.getAxis("bottom").enableAutoSIPrefix(False)
+        plot.getAxis("top").enableAutoSIPrefix(False)
         self._ensure_single_curve()
 
         plot.showGrid(x=True, y=True, alpha=0.3)
         # self.setLabel('top', title, units=unit)
-        plot.getAxis('bottom').setStyle(tickTextOffset=5)
+        # 将x轴显示在顶部
+        # plot.getAxis('bottom').setStyle(tickTextOffset=5)
+        # plot.getAxis('bottom').setTicks([])
+        # plot.getAxis('top').setTicks(plot.getAxis('bottom')))
+        plot.showAxis('top')
+        plot.getAxis('top').setStyle(showValues=True)
+        plot.hideAxis('bottom')
+
+        # plot.getAxis('top').setLabel(text=title)
 
     def _clear_curves(self) -> None:
         plot = self.getPlotItem()
@@ -266,9 +274,9 @@ class MultiTrackWidget(QWidget):
     def plot_dataframe(
         self,
         df: pd.DataFrame,
-        track_specs: Sequence[Union[str, Sequence[str]]],
         depth_column: str,
         widths: Union[int, Sequence[int]] | None = None,
+        track_specs: Sequence[Union[str, Sequence[str]]] = []
     ) -> list[TrackChart]:
         """Create tracks based on DataFrame column specs.
 
@@ -276,7 +284,8 @@ class MultiTrackWidget(QWidget):
             ["MD", "GR", "RHOB", ["M2R1", "M2R9"]]
         """
         if not track_specs:
-            raise ValueError("track_specs must contain at least one track")
+            # raise ValueError("track_specs must contain at least one track")
+            track_specs = [col for col in df.columns if col != depth_column]
 
         if isinstance(widths, int):
             resolved_widths = [widths] * len(track_specs)
@@ -305,7 +314,7 @@ class MultiTrackWidget(QWidget):
                 columns = list(spec)
                 if not columns:
                     continue
-                title = " / ".join(columns)
+                title = "\n".join(columns)
 
             chart = self.add_track(title, width=resolved_widths[idx], show_y_axis=(idx == 0))
             chart.set_dataframe(df, columns, depth_column)

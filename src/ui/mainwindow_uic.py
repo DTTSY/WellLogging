@@ -225,7 +225,7 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         # open_action.setStatusTip("Open a CSV/text file (value, depth)")
 
         def open_file():
-            fname, _ = QFileDialog.getOpenFileName(self, "Open data file", "", "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)")
+            fname, _ = QFileDialog.getOpenFileName(self, "Open data file", "", "Table Files (*.csv *.xls *.xlsx *.parquet);;Text Files (*.txt);;All Files (*)")
             if not fname:
                 return
             try:
@@ -279,35 +279,46 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         start_time = perf_counter()
         def _update_status():
             elapsed = perf_counter() - start_time
-            self.statusBar().showMessage(f"{task}计算中... 耗时: {elapsed:.1f} 秒")
+            self.statusBar().showMessage(f"{task} 计算中... 耗时: {elapsed:.1f} 秒")
         def _handle_homorock_result(df: pd.DataFrame, elapsed: float):
             try:
                 # self.set_mt(df)
-                for i, t in enumerate(df.columns):
-                    w=300
-                    chart = self.mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, df[t].max()))
-                    # sample data: a shifted sine + noise per track
-                    x = df[t].to_numpy()
-                    chart.set_data(x, self.well.static_data.iloc[:, 0].to_numpy())
-                # self.mt.add_track(title=f"{task} 计算结果")
+                # for i, t in enumerate(df.columns):
+                #     w=300
+                #     chart = self.mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, df[t].max()))
+                #     # sample data: a shifted sine + noise per track
+                #     x = df[t].to_numpy()
+                #     chart.set_data(x, self.well.static_data.iloc[:, 0].to_numpy())
+                # # self.mt.add_track(title=f"{task} 计算结果")
+                # 将self.well.static_data的深度列与df拼接
+                df.insert(0, self.well.static_data.columns[0], self.well.static_data.iloc[:, 0])
+                tracks = []
+                if task == HomorockTask.ADDED:
+                    tracks = [['CollapsePressure_MPa_Original','CollapsePressure_MPa_Added'],['CollapsePressure_gcm3_Original','CollapsePressure_gcm3_Added'],'CollapsePressure_MPa_Increment','CollapsePressure_gcm3_Increment']
+                self.mt.plot_dataframe(df, depth_column=self.well.static_data.columns[0], track_specs=tracks)
                 self.timer.stop()
                 self.timer.deleteLater()
                 self.timer = None
                 QMessageBox.information(self, "计算完成", f"{task}: 计算完成，耗时: {elapsed:.2f} 秒")
             except Exception as e:
+                self.timer.stop()
+                self.timer.deleteLater()
+                self.timer = None
                 QMessageBox.warning(self, "Error", f"Failed to set data:\n{e}")
 
         def _handle_homorock_error(message: str):
             self.timer.stop()
+            self.timer.deleteLater()
+            self.timer = None
             self.statusBar().showMessage(f"计算失败，已停止。", 10000)
             QMessageBox.critical(self, f"{task}计算失败", f"计算失败:\n{message}")
 
         self.timer.timeout.connect(_update_status)
         self.timer.start()
-        thread = HomorockCalculationThread(self.well.static_data, task)
-        thread.result_ready.connect(_handle_homorock_result)
-        thread.error_occurred.connect(_handle_homorock_error)
-        thread.start()
+        self.thread = HomorockCalculationThread(self.well.static_data, task)
+        self.thread.result_ready.connect(_handle_homorock_result)
+        self.thread.error_occurred.connect(_handle_homorock_error)
+        self.thread.start()
 
     def HomorockCalculation(self, task):
         if self.well.static_data is None:
