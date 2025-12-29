@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox, QDoubleSpi
 import pandas as pd
 import os
 from collections import defaultdict
-from time import perf_counter
+from time import perf_counter,strftime,gmtime, time
 import traceback
 
 from src.ui.ChartArea_muilt import MultiTrackWidget
@@ -39,8 +39,9 @@ class CalculationWorker(QObject):
             for attr, val in self._calculator_params.items():
                 setattr(calculator, attr, val)
 
+            # print(f"{self._main_data.info()=} before calculation:\n")
+            # print(f"{self._cf_data.info()=} before calculation:\n")
             df = self._main_data.copy(deep=True)
-
             self._emit_progress(5, "准备计算参数", start_time)
             df = calculator.calculate_a_values(df)
             self._emit_progress(25, "已计算a值", start_time)
@@ -60,50 +61,69 @@ class CalculationWorker(QObject):
             self.error.emit(message)
 
 class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
-    submitted = Signal()
+    submitted = Signal(pd.DataFrame)
     def __init__(self, parent=None,mw=None):
         super(DrillingPressureCalculator_ui, self).__init__(parent)
         self.setupUi(self)
         self.mw = mw
-        # self.set
+        self.well = self.mw.well
+         # self.set
         # Additional initialization code can go here
         self.calculator = DrillingPressureCalculator()
         self.pb_open_main.clicked.connect(lambda : self.open_file('main_data'))
         self.pb_open_dpf.clicked.connect(lambda : self.open_file('cf_data'))
-        self.model = defaultdict(lambda: None)
+        self.model = {}
         self._calc_thread = None
         self._worker = None
         self._progress_dialog = None
 
         self.pb_up.clicked.connect(lambda: self.handle_move(OperationType.TRIPPING_OUT))
         self.pb_down.clicked.connect(lambda: self.handle_move(OperationType.TRIPPING_IN))
+        self.dsb_Dh.setValue(60)
+        self.dsb_Dhi.setValue(20)
+        self.dsb_fai300.setValue(0.3)
+        self.dsb_fai600.setValue(0.6)
+
+    def setmodeldata(self,main_data:pd.DataFrame,cf_data:pd.DataFrame):
+        self.model['main_data'] = self.calculator.read_main_data_df(main_data)
+        self.model['cf_data'] = self.calculator.read_collapse_fracture_data_df(cf_data)
 
     def handle_move(self, operation: OperationType):
+        self.setmodeldata(self.well.dynamic_data,self.well.static_data)
+
         if self.data_validation():
             self.drilling_action(operation=operation)
 
     def data_validation(self):
         # TODO: validate input data from UI
-        if self.model['main_data'] is None:
-            QMessageBox.warning(self, "数据缺失", "请先导入主数据文件")
+        if self.model.get('main_data') is None:
+            QMessageBox.warning(self, f"数据缺失", f"请先导入主数据文件")
             return False
-        if self.model['cf_data'] is None: 
+        if self.model.get('cf_data') is None: 
             QMessageBox.warning(self, "数据缺失", "请先导入坍塌破裂压力数据文件")
             return False
+        QMessageBox.information(self, "数据验证通过",f"输入数据验证通过，开始计算。\n ")
         self.calculator.Dh = self.dsb_Dh.value()
         self.calculator.Dhi = self.dsb_Dhi.value()
         self.calculator.fai300 = self.dsb_fai300.value()
         self.calculator.fai600 = self.dsb_fai600.value()
         return True
     
+    def _update_status_bar(self,task='钻井压力计算'):
+        if self._start_time is None:
+            return
+        elapsed = time() - self._start_time
+        elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+        self.mw.statusBar().showMessage(f"{task} 执行中... 耗时: {elapsed_hms}")
+    
     def drilling_action(self, operation: OperationType):
         if self._calc_thread is not None:
-            QMessageBox.information(self, "计算进行中", "请等待当前计算完成。")
+            QMessageBox.information(self, "任务进行中", "请等待当前计算完成。")
             return
 
-        if self.model['main_data'] is None or self.model['cf_data'] is None:
-            QMessageBox.warning(self, "数据缺失", "请先导入所需的数据文件。")
-            return
+        # if self.model['main_data'] is None or self.model['cf_data'] is None:
+        #     QMessageBox.warning(self, "数据缺失", "请先导入所需的数据文件。")
+        #     return
 
         calculator_params = {
             'Dh': self.calculator.Dh,
@@ -122,6 +142,11 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self._progress_dialog.setAutoReset(False)
         self._progress_dialog.setMinimumDuration(0)
         self._progress_dialog.show()
+        # 使用计时器在status bar 显示耗时信息
+        self._start_time = time()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_status_bar)
+        self._timer.start(1000)  # 每秒更新一次
 
         thread = QThread(self)
         worker = CalculationWorker(
@@ -158,12 +183,19 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self.submitted.emit(self.model['result'])
         if self._progress_dialog is not None:
             self._progress_dialog.setValue(100)
-            self._progress_dialog.setLabelText(f"已保存结果\n总耗时: {elapsed:.2f} 秒")
+            # self._progress_dialog.setLabelText(f"已保存结果\n总耗时: {elapsed:.2f} 秒")
             self._progress_dialog.close()
             self._progress_dialog = None
         self.pb_up.setEnabled(True)
         self.pb_down.setEnabled(True)
-        QMessageBox.information(self, "计算完成", f"计算耗时: {elapsed:.2f} 秒，钻井压力计算已完成并保存结果文件。")
+        QMessageBox.information(self, "任务完成", f"任务耗时: {elapsed:.2f} 秒，钻井压力计算已完成并保存结果文件。")
+        if hasattr(self, '_timer') and self._timer:
+            try:
+                self._timer.stop()
+                self._timer.deleteLater()
+            except Exception:
+                pass
+            self._timer = None
 
     def _handle_calculation_error(self, message: str):
         if self._progress_dialog is not None:
@@ -171,7 +203,7 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
             self._progress_dialog = None
         self.pb_up.setEnabled(True)
         self.pb_down.setEnabled(True)
-        QMessageBox.critical(self, "计算失败", message)
+        QMessageBox.critical(self, "任务失败", message)
 
     def _on_calculation_thread_finished(self):
         self._calc_thread = None
@@ -202,25 +234,40 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         self.setupUi(self)
         self.app = app #declare an app member
         self.setMinimumSize(QSize(1200, 800))
-        self.dlg = DrillingPressureCalculator_ui()
-        self.dlg.submitted.connect(self.set_mt)
+        self.well = Well()
+        self.dlg = DrillingPressureCalculator_ui(mw=self)
+        self.dlg.submitted.connect(self.DrillingPressureCalculator_result_submitted)
         self.timer: QTimer = None
 
         # self.homorockCalculationThread = HomorockCalculationThread(self.well.static_data)
 
         self.mt = None
         # self.dataModel = dict()
-        self.well = Well()
 
-        #Menubar and menus
-        # menu_bar = self.menuBar()
-        # file_menu = menu_bar.addMenu("文件")
-        # # new_action =  file_menu.addAction("New")
-        # open_action = file_menu.addAction("导入 地质力学数据")
+        def open_dt_file():
+            fname, _ = QFileDialog.getOpenFileName(self, "Open data file", "", "Table Files (*.csv *.xls *.xlsx *.parquet);;Text Files (*.txt);;All Files (*)")
+            if not fname:
+                return
+            try:
+                # data = np.loadtxt(fname, delimiter=',')
+                # metaInfo = dict()
+                # self.well.header['well_name'] = os.path.basename(fname).split('.')[0]
+                data =  self.well.read_dynamic_data_tableFile_duckdb(fname,table_name='dynamic_data')
+                # self.well.header['depth_range'] = (self.well.header['min_depth'], self.well.header['max_depth'])
+                # self.dsp_startDepth.setMinimum(self.well.header['min_depth'])
+                # self.dsp_startDepth.setMaximum(self.well.header['max_depth'])
+                # self.dsp_endDepth.setMinimum(self.well.header['min_depth'])
+                # self.dsp_endDepth.setMaximum(self.well.header['max_depth'])
+                # self.dsp_startDepth.setValue(self.well.header['min_depth'])
+                # self.dsp_endDepth.setValue(self.well.header['max_depth'])
+                self.well.set_dynamic_data(data)
+                QMessageBox.information(self, "数据导入成功", f"成功导入时间域数据: {os.path.basename(fname)}")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
+                return
 
-        # open_d_action = file_menu.addAction("导入 钻井动态数据")
-
-        self.action_import_DTdata.triggered.connect(lambda: QMessageBox.warning(self, "导入 钻井动态数据", "方法未实现"))
+        self.action_import_DTdata.triggered.connect(open_dt_file)
         # open_action.setShortcut("Ctrl+O")
         # open_action.setStatusTip("Open a CSV/text file (value, depth)")
 
@@ -232,26 +279,31 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
                 # data = np.loadtxt(fname, delimiter=',')
                 # metaInfo = dict()
                 self.well.header['well_name'] = os.path.basename(fname).split('.')[0]
-                data =  self.well.read_tableFile(fname)
-                self.well.header['depth_range'] = (float(data.iloc[:,0].min()), float(data.iloc[:,0].max()))
-                self.statusBar().showMessage(f"Loaded file: {os.path.basename(fname)}", 5000)
-                # self.dataModel['log_data'] = data
+                data =  self.well.read_static_data_tableFile_duckdb(fname,table_name='static_data')
+                self.well.header['depth_range'] = (self.well.header['min_depth'], self.well.header['max_depth'])
+                self.dsp_startDepth.setMinimum(self.well.header['min_depth'])
+                self.dsp_startDepth.setMaximum(self.well.header['max_depth'])
+                self.dsp_endDepth.setMinimum(self.well.header['min_depth'])
+                self.dsp_endDepth.setMaximum(self.well.header['max_depth'])
+                self.dsp_startDepth.setValue(self.well.header['min_depth'])
+                self.dsp_endDepth.setValue(self.well.header['max_depth'])
                 self.well.set_static_data(data)
-                # self.well.header = metaInfo
-                # self.dataModel['log_metaInfo'] = metaInfo
+
             except Exception as e:
                 QMessageBox.warning(self, "Load error", f"Failed to load file:\n{e}")
                 return
             # Expect at least two columns: value, depth
             if data.ndim == 1:
-                QMessageBox.warning(self, "Format error", "File must contain two columns (value, depth)")
+                QMessageBox.warning(self, "Format error", "File must contain two columns (depth,value)")
                 return
             if data.shape[1] < 2:
-                QMessageBox.warning(self, "Format error", "File must have at least two columns (value, depth)")
+                QMessageBox.warning(self, "Format error", "File must have at least two columns (depth, value)")
                 return
             self.set_mt(self.well.static_data)
+
         self.action_import_Ddata.triggered.connect(open_file)
-        # open_action.triggered.connect(open_file)
+        self.action_conf.triggered.connect(lambda: QMessageBox.warning(self, "项目设置", "方法未实现"))
+        self.action_helpDocs.triggered.connect(lambda: QMessageBox.warning(self, "帮助文档", "方法未实现"))
 
 
         # edit_menu =menu_bar.addMenu("稳定性分析")
@@ -272,50 +324,73 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
             QMessageBox.warning(self, "数据缺失", "未导入有效数据")
             return
         if self.timer is not None:
-            QMessageBox.information(self, "计算进行中", "请等待当前计算完成。")
+            QMessageBox.information(self, "任务进行中", "请等待当前任务完成。")
             return
         self.timer = QTimer(self)
         self.timer.setInterval(500)
         start_time = perf_counter()
         def _update_status():
             elapsed = perf_counter() - start_time
-            self.statusBar().showMessage(f"{task} 计算中... 耗时: {elapsed:.1f} 秒")
+            elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+            self.statusBar().showMessage(f"{task} 任务执行中... 耗时: {elapsed_hms}")
+
         def _handle_homorock_result(df: pd.DataFrame, elapsed: float):
             try:
-                # self.set_mt(df)
-                # for i, t in enumerate(df.columns):
-                #     w=300
-                #     chart = self.mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, df[t].max()))
-                #     # sample data: a shifted sine + noise per track
-                #     x = df[t].to_numpy()
-                #     chart.set_data(x, self.well.static_data.iloc[:, 0].to_numpy())
-                # # self.mt.add_track(title=f"{task} 计算结果")
-                # 将self.well.static_data的深度列与df拼接
                 df.insert(0, self.well.static_data.columns[0], self.well.static_data.iloc[:, 0])
                 tracks = []
+                result_info = ''
+                append_chart = False
                 if task == HomorockTask.ADDED:
                     tracks = [['CollapsePressure_MPa_Original','CollapsePressure_MPa_Added'],['CollapsePressure_gcm3_Original','CollapsePressure_gcm3_Added'],'CollapsePressure_MPa_Increment','CollapsePressure_gcm3_Increment']
-                self.mt.plot_dataframe(df, depth_column=self.well.static_data.columns[0], track_specs=tracks)
-                self.timer.stop()
-                self.timer.deleteLater()
-                self.timer = None
-                QMessageBox.information(self, "计算完成", f"{task}: 计算完成，耗时: {elapsed:.2f} 秒")
+                    # 1. 计算基础数值
+                    num_rows = len(df)
+                    valid_data = df['CollapsePressure_MPa_Original'].dropna()
+                    num_valid = len(valid_data)
+                    num_failed = num_rows - num_valid
+
+                    # 2. 拼接字符串 (使用 f-string)
+                    output_str = f"""
+                    ========== 计算统计 ==========
+                    总深度点数: {num_rows}
+                    成功计算: {num_valid}
+                    计算失败: {num_failed}
+                    """
+                    if num_valid > 0:
+                        # 进一步拼接统计详情
+                        details = (
+                            f"\n【原始坍塌压力】范围 (MPa):\n"
+                            f"  最小值: {df['CollapsePressure_MPa_Original'].min():.2f} | 最大值: {df['CollapsePressure_MPa_Original'].max():.2f} | 平均值: {df['CollapsePressure_MPa_Original'].mean():.2f}\n"
+                            f"【叠加后坍塌压力】范围 (MPa):\n"
+                            f"  最小值: {df['CollapsePressure_MPa_Added'].min():.2f} | 最大值: {df['CollapsePressure_MPa_Added'].max():.2f} | 平均值: {df['CollapsePressure_MPa_Added'].mean():.2f}\n"
+                            f"【坍塌压力增量】范围 (g/cm³):\n"
+                            f"  最小值: {df['CollapsePressure_gcm3_Increment'].min():.4f} | 最大值: {df['CollapsePressure_gcm3_Increment'].max():.4f} | 平均值: {df['CollapsePressure_gcm3_Increment'].mean():.4f}"
+                        )
+                        output_str += details
+
+                    # 3. 最后一次性输出
+                    result_info = output_str
+                if append_chart:
+                    self.mt.plot_dataframe(df, depth_column=self.well.static_data.columns[0], track_specs=tracks,append=append_chart)
+                # 将耗时转换为h:m:s格式
+                elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+                QMessageBox.information(self, "任务完成", f"{task}: 任务完成，耗时: {elapsed_hms}\n{result_info}")
             except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set data:\n{e}")
+            finally:
                 self.timer.stop()
                 self.timer.deleteLater()
                 self.timer = None
-                QMessageBox.warning(self, "Error", f"Failed to set data:\n{e}")
 
         def _handle_homorock_error(message: str):
             self.timer.stop()
             self.timer.deleteLater()
             self.timer = None
-            self.statusBar().showMessage(f"计算失败，已停止。", 10000)
-            QMessageBox.critical(self, f"{task}计算失败", f"计算失败:\n{message}")
+            self.statusBar().showMessage(f"任务失败，已停止。", 10000)
+            QMessageBox.critical(self, f"{task}任务失败", f"任务失败:\n{message}")
 
         self.timer.timeout.connect(_update_status)
         self.timer.start()
-        self.thread = HomorockCalculationThread(self.well.static_data, task)
+        self.thread: HomorockCalculationThread = HomorockCalculationThread(self.well.static_data, task)
         self.thread.result_ready.connect(_handle_homorock_result)
         self.thread.error_occurred.connect(_handle_homorock_error)
         self.thread.start()
@@ -332,7 +407,8 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         timer.setInterval(500)
         def _update_status():
             elapsed = perf_counter() - start_time
-            self.statusBar().showMessage(f"同质岩计算中... 耗时: {elapsed:.1f} 秒")
+            elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+            self.statusBar().showMessage(f"任务执行中... 耗时: {elapsed_hms}")
         timer.timeout.connect(_update_status)
 
         class _Worker(QObject):
@@ -376,7 +452,8 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
                     self._homorock_timer = None
 
                 elapsed = perf_counter() - start_time_local
-                self.statusBar().showMessage(f"同质岩计算完成，耗时: {elapsed:.2f} 秒", 10000)
+                elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+                self.statusBar().showMessage(f"任务完成，耗时: {elapsed_hms} ", 10000)
 
                 try:
                     self.set_mt(df)
@@ -387,7 +464,7 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
                     except Exception:
                         pass
 
-                QMessageBox.information(self, "计算完成", "同质岩计算完成并已绘图。")
+                # QMessageBox.information(self, "计算完成", "同质岩计算完成并已绘图。")
             finally:
                 try:
                     worker.deleteLater()
@@ -409,8 +486,9 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
                     pass
                 self._homorock_timer = None
             elapsed = perf_counter() - start_time_local
-            self.statusBar().showMessage(f"同质岩计算失败，已停止。耗时: {elapsed:.2f} 秒", 10000)
-            QMessageBox.critical(self, "计算失败", f"同质岩计算失败:\n{message}")
+            elapsed_hms = strftime("%H:%M:%S", gmtime(elapsed))
+            self.statusBar().showMessage(f"任务失败，已停止。耗时: {elapsed_hms}", 10000)
+            QMessageBox.critical(self, "任务失败", f"任务失败:\n{message}")
             try:
                 worker.deleteLater()
             except Exception:
@@ -441,7 +519,10 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         thread.start()
 
     def open_drilling_pressure_calculator(self):
+        self.dlg.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
+        self.dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.dlg.show()
+        # self.dlg.exec()
 
     def quit_app(self):
         self.app.quit()
@@ -467,12 +548,17 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         try:
             # self.set_mt(self.well.static_data, depth_range=(dmin, dmax))
             self.mt.set_depth_range(dmin, dmax)
-            self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {dmin} - {dmax}")
+            self.well.set_depth_window(dmin, dmax)
+            self.well.set_static_data(self.well.get_dataframe_by_depth(dmin, dmax, table_name='static_data'))
+            self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {dmin}/{self.well.header.get('min_depth', '未知')} - {dmax}/{self.well.header.get('max_depth', '未知')} 数据样本数量: {self.well.static_data.shape[0]}")
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to apply depth range:\n{e}")
         
-    
+    def DrillingPressureCalculator_result_submitted(self, df: pd.DataFrame):
+        print("Received Drilling Pressure Calculator result")
+        print(df.info())
+        # self.set_mt(df)
     def set_mt(self, data:pd.DataFrame, depth_range=None):
         if self.mt is not None:
             self.mt.setParent(None)  # Remove existing widget
@@ -484,29 +570,9 @@ class MainWindow(QMainWindow, Ui_APPMainWindow):
         else:
             dmin = data.iloc[:, 0].min()
             dmax = data.iloc[:, 0].max()
-        mt = MultiTrackWidget(depth_range=(dmin, dmax))
+        self.mt = MultiTrackWidget(depth_range=(dmin, dmax))
+        self.mt.plot_dataframe(data, depth_column=data.columns[0])
 
-        depths = data.iloc[:, 0].to_numpy()
-
-        titles = [name for name in data.columns[1:]]
-
-        for i, t in enumerate(titles):
-            w=300
-            chart = mt.add_track(t, width=w, show_y_axis=(i == 0), x_range=(0, data[t].max()))
-            # sample data: a shifted sine + noise per track
-            x = data[t].to_numpy()
-            chart.set_data(x, depths)
-        # mt.resize(700, 800)
-        # 固定子图之间的水平间隔（像素）
-        # fixed_gap = 2
-        # mt._tracks_layout.setSpacing(fixed_gap)
-
-        # Place the multi-track widget in the main window
-        # self.setCentralWidget(mt)
-        # if self.mt is None:
-        #     self.gridLayout_main_left.replaceWidget(self.mt, mt)
-        # else:
-        self.mt = mt
         self.gridLayout_main_left.addWidget(self.mt)
-        self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {self.well.header.get('depth_range', ('未知', '未知'))}")
+        self.statusBar().showMessage(f"井名: {self.well.header.get('well_name', '未知')}  深度范围: {self.well.header.get('depth_range', ('未知', '未知'))} 数据样本数量: {self.well.static_data.shape[0]}")
     

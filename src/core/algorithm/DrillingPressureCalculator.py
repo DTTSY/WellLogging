@@ -254,6 +254,76 @@ class DrillingPressureCalculator:
         print(f"成功读取 {len(data_map)} 行坍塌破裂压力数据")
         return data_map
 
+    def read_collapse_fracture_data_df(self, df: pd.DataFrame) -> Dict[int, Tuple[float, float, float, float]]:
+        """读取坍塌破裂压力数据"""
+        data_map = {}
+        df = df.copy(deep=True)
+
+        # df = self.read_csv_with_encoding(filename)
+        # if df is None:
+        #     print(f"错误: 无法打开坍塌破裂压力文件 {filename}")
+        #     return data_map
+
+        # 清理列名
+        df.columns = [str(col).strip().replace(' ', '').replace('\t', '').replace('\r', '').replace('\n', '')
+                      for col in df.columns]
+
+        print(f"文件列名: {list(df.columns)}")
+
+        # 查找列
+        depth_col = self._find_column(df.columns, DEPTH_COLUMN_NAME,
+                                      ["dep", "depth", "井深", "深度"])
+
+        if depth_col is None:
+            print("错误: 未能找到深度列")
+            return data_map
+
+        collapse_pressure_col = self._find_column(df.columns, COLLAPSE_PRESSURE_COLUMN,
+                                                  ["pc", "坍塌", "塌", "collapse"])
+
+        fracture_pressure_col = self._find_column(df.columns, FRACTURE_PRESSURE_COLUMN,
+                                                  ["pf", "破裂", "破", "fracture"])
+
+        collapse_eq_density_col = self._find_column(df.columns, COLLAPSE_EQ_DENSITY_COLUMN,
+                                                    ["denmc", "坍塌密度", "collapsedensity"])
+
+        fracture_eq_density_col = self._find_column(df.columns, FRACTURE_EQ_DENSITY_COLUMN,
+                                                    ["denmf", "破裂密度", "fracturedensity"])
+
+        print(f"找到的列: 深度={depth_col}, 坍塌压力={collapse_pressure_col}, "
+              f"破裂压力={fracture_pressure_col}")
+
+        # 处理数据
+        for _, row in df.iterrows():
+            try:
+                depth = int(float(row[depth_col]))
+
+                collapse_pressure = 0.0
+                fracture_pressure = 0.0
+                collapse_eq_density = 0.0
+                fracture_eq_density = 0.0
+
+                if collapse_pressure_col and collapse_pressure_col in df.columns:
+                    collapse_pressure = float(row[collapse_pressure_col])
+
+                if fracture_pressure_col and fracture_pressure_col in df.columns:
+                    fracture_pressure = float(row[fracture_pressure_col])
+
+                if collapse_eq_density_col and collapse_eq_density_col in df.columns:
+                    collapse_eq_density = float(row[collapse_eq_density_col])
+
+                if fracture_eq_density_col and fracture_eq_density_col in df.columns:
+                    fracture_eq_density = float(row[fracture_eq_density_col])
+
+                data_map[depth] = (collapse_pressure, fracture_pressure,
+                                   collapse_eq_density, fracture_eq_density)
+            except Exception as e:
+                continue
+
+        print(f"成功读取 {len(data_map)} 行坍塌破裂压力数据")
+        return data_map
+
+
     def _find_column(self, columns: List[str], exact_name: str, fuzzy_names: List[str]) -> Optional[str]:
         """查找列名"""
         # 精确匹配
@@ -383,6 +453,117 @@ class DrillingPressureCalculator:
 
         print(f"成功读取 {len(df)} 行主数据")
         return df
+
+    def read_main_data_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """读取主数据"""
+        # df = self.read_csv_with_encoding(filename)
+        # if df is None:
+        #     print(f"错误: 无法打开主数据文件 {filename}")
+        #     return pd.DataFrame()
+
+        # 清理列名
+        df = df.copy(deep=True)
+        original_columns = list(df.columns)
+        df.columns = [str(col).strip().replace(' ', '').replace('\t', '').replace('\r', '').replace('\n', '')
+                      for col in df.columns]
+
+        print(f"文件列名: {original_columns}")
+        print(f"清理后列名: {list(df.columns)}")
+
+        # 查找必需的列
+        column_mapping = {}
+
+        # 深度列（必需）
+        depth_col = self._find_column(df.columns, DEPTH_COLUMN_NAME,
+                                      ["dep", "depth", "井深", "深度"])
+        if depth_col:
+            column_mapping[depth_col] = "Depth"
+            print(f"找到深度列: {depth_col}")
+        else:
+            print("错误: 未能找到深度列")
+            return pd.DataFrame()
+
+        # Dw列（必需）
+        dw_col = self._find_column(df.columns, DW_COLUMN_NAME,
+                                   ["dw", "钻杆外径", "钻杆直径"])
+        if dw_col:
+            column_mapping[dw_col] = "Dw"
+            print(f"找到Dw列: {dw_col}")
+        else:
+            print("错误: 未能找到Dw列")
+            return pd.DataFrame()
+
+        # denL列（必需）
+        denL_col = self._find_column(df.columns, DENL_COLUMN_NAME,
+                                     ["mwin", "denl", "密度", "泥浆", "钻井液"])
+        if denL_col:
+            column_mapping[denL_col] = "denL"
+            print(f"找到denL列: {denL_col}")
+        else:
+            print("错误: 未能找到denL列")
+            return pd.DataFrame()
+
+        # HOKHEI列（用于计算a和v的分子）
+        hokhei_col = self._find_column(df.columns, COLUMN1_FOR_A_NAME, ["hokhei", "hook", "大钩"])
+        if hokhei_col:
+            column_mapping[hokhei_col] = "HOKHEI"
+            print(f"找到HOKHEI列: {hokhei_col}")
+        else:
+            print("错误: 未能找到HOKHEI列")
+            return pd.DataFrame()
+
+        # WELLTIME列（用于计算a和v的分母）- 时间格式
+        welltime_col = self._find_column(df.columns, COLUMN2_FOR_A_NAME, ["welltime", "time", "时间"])
+        if welltime_col:
+            column_mapping[welltime_col] = "WELLTIME"
+            print(f"找到WELLTIME列: {welltime_col}")
+        else:
+            print("错误: 未能找到WELLTIME列")
+            return pd.DataFrame()
+
+        # WELLDATE列 - 日期列
+        welldate_col = self._find_column(df.columns, "WELLDATE", ["welldate", "date", "日期", "datetime"])
+        if welldate_col:
+            column_mapping[welldate_col] = "WELLDATE"
+            print(f"找到WELLDATE列: {welldate_col}")
+        else:
+            print("警告: 未能找到WELLDATE列，将假设所有数据在同一天")
+            df["WELLDATE"] = "2000-01-01"  # 默认日期
+
+        # 重命名列
+        df = df.rename(columns=column_mapping)
+
+        # 转换WELLDATE为datetime格式
+        print(f"\n转换WELLDATE和WELLTIME格式...")
+        df["WELLDATE_dt"] = pd.to_datetime(df["WELLDATE"], errors='coerce')
+
+        # 转换WELLTIME时间格式为秒数（考虑日期）
+        df["WELLTIME_total_seconds"] = df.apply(
+            lambda row: self._convert_time_to_seconds_with_date(row["WELLDATE_dt"], row["WELLTIME"]),
+            axis=1
+        )
+
+        # 显示数据预览
+        print(f"\n数据预览（前5行）:")
+        print(df[["Depth", "Dw", "denL", "HOKHEI", "WELLDATE", "WELLTIME", "WELLTIME_total_seconds"]].head())
+
+        # 显示数据类型和统计信息
+        print(f"\n数据类型和统计信息:")
+        for col in ["Depth", "Dw", "denL", "HOKHEI", "WELLTIME_total_seconds"]:
+            if col in df.columns:
+                print(f"  {col}: {df[col].dtype}")
+                print(f"    NaN数量: {df[col].isna().sum()}")
+                print(f"    最小值: {df[col].min() if not df[col].isna().all() else 'NaN'}")
+                print(f"    最大值: {df[col].max() if not df[col].isna().all() else 'NaN'}")
+
+        # 检查是否有数据
+        if len(df) == 0:
+            print("警告: 读取的数据为空")
+            return pd.DataFrame()
+
+        print(f"成功读取 {len(df)} 行主数据")
+        return df
+
 
     def _convert_time_to_seconds_with_date(self, date_dt, time_str):
         """将日期和时间字符串转换为总秒数（从某个参考点开始）"""

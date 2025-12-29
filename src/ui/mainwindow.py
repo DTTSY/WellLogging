@@ -276,6 +276,7 @@ class MainWindow(QMainWindow):
 
     def open_drilling_pressure_calculator(self):
         model = DrillingPressureModel()
+        model.cf_data = self.wel
         controller = DrillingPressureController(model)
         self.dlg = DrillingPressureCalculator_ui(controller=controller)
         self.dlg.show()

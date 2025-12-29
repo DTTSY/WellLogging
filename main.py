@@ -4,11 +4,15 @@ from qt_material import apply_stylesheet
 # from src.ui.mainwindow import MainWindow
 from src.ui.mainwindow_uic import MainWindow
 
-app = QApplication(sys.argv)
+def main(argv):
+    app = QApplication(argv)
 
-# Apply a built-in theme
-apply_stylesheet(app, theme='light_blue.xml')
-window = MainWindow(app)
-window.show()
+    # Apply a built-in theme
+    apply_stylesheet(app, theme='light_blue.xml')
+    window = MainWindow(app)
+    window.show()
+    app.exec()
 
-app.exec()
+
+if __name__ == "__main__":
+    main(sys.argv)

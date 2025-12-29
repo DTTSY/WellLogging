@@ -3,7 +3,7 @@ import lasio
 # import welly
 import pandas as pd
 from pathlib import Path
-
+from collections import defaultdict
 import duckdb
 
 
@@ -28,6 +28,21 @@ COLUMN_SPECS = {
     "PP":    ("孔隙压力", "MPa", float)
 }
 
+
+
+def detect_file_encoding(file_path):
+    """
+    Detects the encoding of a given file.
+
+    :param file_path: Path to the file.
+    :return: Detected encoding as a string.
+    """
+    import chardet
+
+    with open(file_path, 'rb') as f:
+        raw_data = f.read(10000)  # Read first 10KB for detection
+    result = chardet.detect(raw_data)
+    return result['encoding']
 
 class wellModels:
     @staticmethod
@@ -138,7 +153,8 @@ class Well:
         self.header = {}
         self._duckdb_con = duckdb.connect(database=":memory:")
         self._excel_extension_loaded = False
-        self._table_name = None
+        self._table_names = defaultdict(list)
+        self.depth_window = (0, 0)
 
 
     def read_tableFile(self, table_file_path):
@@ -159,12 +175,17 @@ class Well:
         self.static_data = data
     def set_dynamic_data(self, data):
         self.dynamic_data = data
+    def set_depth_window(self, depth_min, depth_max):
+        self.depth_window = (depth_min, depth_max)
 
-    def read_tableFile_duckdb(self, table_file_path):
+    def read_static_data_tableFile_duckdb(self, table_file_path, table_name=None):
         ext = Path(table_file_path).suffix.lower()
         normalized_path = str(Path(table_file_path).resolve())
-        table_name = "well_data"
-        table_identifier = duckdb.escape_identifier(table_name)
+        if table_name is None:
+            table_name = "static_data"
+        self.header['source_file'] = normalized_path
+        # self.header['well_name'] = table_name
+        table_identifier = table_name
 
         if ext == ".csv":
             self._duckdb_con.execute(
@@ -174,7 +195,7 @@ class Well:
         elif ext in {".xls", ".xlsx"}:
             self._ensure_excel_extension()
             self._duckdb_con.execute(
-                f"CREATE OR REPLACE TEMP TABLE {table_identifier} AS SELECT * FROM read_excel(?)",
+                f"CREATE OR REPLACE TEMP TABLE {table_identifier} AS SELECT * FROM read_xlsx(?)",
                 [normalized_path],
             )
         elif ext == ".parquet":
@@ -185,27 +206,66 @@ class Well:
         else:
             raise ValueError(f"Unsupported table format: {ext}")
 
-        self._table_name = table_name
-        df = self._duckdb_con.execute(f"SELECT * FROM {table_identifier}").df().astype(float)
+        self._table_names[table_name].append(table_name)
+        # 深度列默认名称为'Depth'
+        # 车查询深度最小值和最大值
+        min_depth = self._duckdb_con.execute(f"SELECT MIN(Depth) FROM {table_identifier}").fetchone()[0]
+        max_depth = self._duckdb_con.execute(f"SELECT MAX(Depth) FROM {table_identifier}").fetchone()[0]
+        self.header['min_depth'] = min_depth
+        self.header['max_depth'] = max_depth
+        self.depth_window = (min_depth, max_depth)
+
+        df = self._duckdb_con.execute(f"SELECT * FROM {table_identifier}").fetchdf()
+        df = self._cast_numeric_columns(df)
+        if 'Sh_1' in df.columns:
+            df = df.rename(columns={'Sh_1': 'Sh'})
+        self.static_data = df
+        return df
+    
+    def read_dynamic_data_tableFile_duckdb(self, table_file_path, table_name=None):
+        ext = Path(table_file_path).suffix.lower()
+        normalized_path = str(Path(table_file_path).resolve())
+        encoding = 'GB18030'
+        # 识别normalized_path文件的字符编码格式
+
+        if table_name is None:
+            table_name = "dynamic_data"
+        self.header['dynamic_source_file'] = normalized_path
+        table_identifier = table_name
+        df = None
+        if ext == ".csv":
+            df = pd.read_csv(normalized_path, encoding=encoding)
+        self.dynamic_data = df
         return df
 
-    def get_dataframe_by_depth(self, depth_min, depth_max, depth_column=None):
-        if not self._table_name:
-            raise RuntimeError("No table has been loaded")
+    def get_dataframe_by_depth(self, depth_min, depth_max, table_name='None',depth_column='Depth'):
+        if not self._table_names[table_name]:
+            raise RuntimeError("No table has been found. Please load data first.")
         depth_col = depth_column
         if depth_col is None:
             if self.static_data is None:
-                depth_col = "DEPTH"
+                depth_col = "Depth"
             else:
                 depth_col = self.static_data.columns[0]
-        table_identifier = duckdb.escape_identifier(self._table_name)
-        depth_identifier = duckdb.escape_identifier(depth_col)
+        table_identifier =table_name
+        depth_identifier = depth_col
         query = (
             f"SELECT * FROM {table_identifier} "
             f"WHERE {depth_identifier} BETWEEN ? AND ? "
             f"ORDER BY {depth_identifier}"
         )
-        return self._duckdb_con.execute(query, [depth_min, depth_max]).df().astype(float)
+        df = self._duckdb_con.execute(query, [depth_min, depth_max]).fetchdf()
+        df = self._cast_numeric_columns(df)
+        # 显示将Sh_1列名改为Sh，如果存在的话
+        if 'Sh_1' in df.columns:
+            df = df.rename(columns={'Sh_1': 'Sh'})
+
+        return df
+
+    def _cast_numeric_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        numeric_columns = df.select_dtypes(include="number").columns
+        df[numeric_columns] = df[numeric_columns].astype(float)
+        return df
 
     def _ensure_excel_extension(self):
         if not self._excel_extension_loaded:
@@ -214,8 +274,7 @@ class Well:
             self._duckdb_con.execute("LOAD 'excel'")
             self._excel_extension_loaded = True
 
-if __name__ == "__main__":
-    # Example usage
+def test_welly():
     file_path = "data/X3.xlsx"
     meta_data = {"WELL": "测试井", "LOC": "Location", "COMP": "Company", "DATE": "2024-06-01", "UWI": "1234567890",'NULL': -9999}
     las_file = wellModels.from_file_to_las(file_path, meta_data ,"output/output.las")
@@ -271,3 +330,9 @@ if __name__ == "__main__":
     # plt.show()
 
     # well.plot_2d(logs=curve_name)
+
+
+
+if __name__ == "__main__":
+    # Example usage
+    pass

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
+from src.models.wellModels import COLUMN_SPECS
 
 pg.setConfigOptions(
     antialias=False,       # 测井曲线通常不需要抗锯齿，关闭可极大提升速度
@@ -64,6 +64,9 @@ class TrackChart(pg.PlotWidget):
         self, title: str, x_min: float, x_max: float, depth_min: float, depth_max: float, show_y_axis: bool
     ) -> None:
         plot = self.getPlotItem()
+        # print(f'plot: {title}')
+        title = title + f"({COLUMN_SPECS.get(title.upper(), ('None', 'None', 'None'))[1]})"
+        # print(f'plot after: {title}')
         plot.setTitle(title)
         plot.invertY(True)  # depth increases downward
         # plot.setMenuEnabled(False)
@@ -276,7 +279,8 @@ class MultiTrackWidget(QWidget):
         df: pd.DataFrame,
         depth_column: str,
         widths: Union[int, Sequence[int]] | None = None,
-        track_specs: Sequence[Union[str, Sequence[str]]] = []
+        track_specs: Sequence[Union[str, Sequence[str]]] = [],
+        append:bool=False
     ) -> list[TrackChart]:
         """Create tracks based on DataFrame column specs.
 
@@ -302,8 +306,8 @@ class MultiTrackWidget(QWidget):
 
         self._depth_min = float(depth_series.min())
         self._depth_max = float(depth_series.max())
-
-        self.clear_tracks()
+        if not append:
+            self.clear_tracks()
         charts: list[TrackChart] = []
 
         for idx, spec in enumerate(track_specs):
@@ -314,7 +318,6 @@ class MultiTrackWidget(QWidget):
                 columns = list(spec)
                 if not columns:
                     continue
-                title = "\n".join(columns)
 
             chart = self.add_track(title, width=resolved_widths[idx], show_y_axis=(idx == 0))
             chart.set_dataframe(df, columns, depth_column)
