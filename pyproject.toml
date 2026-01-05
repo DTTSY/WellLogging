@@ -11,6 +11,7 @@ dependencies = [
     "pyqtgraph>=0.14.0",
     "pyside6>=6.10.1",
     "qt-material>=2.17",
+    "scikit-learn>=1.7.2",
     "welly>=0.5.2",
 ]
 
@@ -22,3 +23,8 @@ default = true
 [[tool.uv.index]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

@@ -39,3 +39,9 @@ Project/
     ├── __init__.py
     ├── test_core.py
     └── test_ui.py
+
+
+安装环境
+```bash
+uv pip install torch torchvision -f https://mirrors.aliyun.com/pytorch-wheels/cu128
+```

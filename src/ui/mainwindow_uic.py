@@ -92,7 +92,22 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self.setmodeldata(self.well.dynamic_data,self.well.static_data)
 
         if self.data_validation():
-            self.drilling_action(operation=operation)
+            # 使用计时器在status bar 显示耗时信息
+            self._start_time = time()
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._update_status_bar)
+            self._timer.start(1000)  # 每秒更新一次
+            try:
+                self.drilling_action(operation=operation)
+            except Exception as e:
+                QMessageBox.warning(self, "计算错误", f"计算过程中出现错误:\n{e}")
+                if hasattr(self, '_timer') and self._timer:
+                    try:
+                        self._timer.stop()
+                        self._timer.deleteLater()
+                    except Exception:
+                        pass
+                    self._timer = None
 
     def data_validation(self):
         # TODO: validate input data from UI
@@ -142,11 +157,6 @@ class DrillingPressureCalculator_ui(QWidget, Ui_w_DrillingPressureCalculator):
         self._progress_dialog.setAutoReset(False)
         self._progress_dialog.setMinimumDuration(0)
         self._progress_dialog.show()
-        # 使用计时器在status bar 显示耗时信息
-        self._start_time = time()
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._update_status_bar)
-        self._timer.start(1000)  # 每秒更新一次
 
         thread = QThread(self)
         worker = CalculationWorker(
